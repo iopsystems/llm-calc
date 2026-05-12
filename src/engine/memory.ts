@@ -1,4 +1,4 @@
-import type { AttentionConfig, CalcInput, GpuVariant, MemoryResult, ModelArch } from './types'
+import type { AttentionConfig, CalcInput, Dtype, GpuVariant, MemoryResult, ModelArch } from './types'
 import { bytesOf } from './dtypes'
 
 const BYTES_PER_GB = 1024 ** 3
@@ -14,6 +14,20 @@ export function activeParams(model: ModelArch): number {
     : model.paramCount
 }
 
+export function kvBytesPerToken(model: ModelArch, kvDtype: Dtype): number {
+  const att = model.attention
+  if (att.type === 'mla') {
+    return model.layers * (att.kvLoraRank + att.qkRopeHeadDim) * bytesOf(kvDtype)
+  }
+  return 2 * model.layers * model.numKvHeads * model.headDim * bytesOf(kvDtype)
+}
+
+export function attentionDim(model: ModelArch): number {
+  const att = model.attention
+  if (att.type === 'mla') return att.kvLoraRank + att.qkRopeHeadDim
+  return model.numHeads * model.headDim
+}
+
 function findVariant(input: CalcInput): GpuVariant {
   const v = input.gpu.variants.find(v => v.id === input.gpuVariantId)
   if (!v) throw new Error(`Variant ${input.gpuVariantId} not in ${input.gpu.id}`)
@@ -26,8 +40,7 @@ export function computeMemory(input: CalcInput): MemoryResult {
   const seqlen = workload.promptTokens + workload.outputTokens
 
   const weights = model.paramCount * bytesOf(quant.weights)
-  const kvPerTokenPerRequest =
-    2 * model.layers * model.numKvHeads * model.headDim * bytesOf(quant.kv)
+  const kvPerTokenPerRequest = kvBytesPerToken(model, quant.kv)
   const effSeqlen = effectiveAttentionLength(seqlen, model.attention)
   const kvCachePerRequest = kvPerTokenPerRequest * effSeqlen
   const kvCacheTotal = kvCachePerRequest * workload.concurrency
