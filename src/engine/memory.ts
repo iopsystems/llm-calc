@@ -1,7 +1,12 @@
-import type { CalcInput, GpuVariant, MemoryResult } from './types'
+import type { AttentionConfig, CalcInput, GpuVariant, MemoryResult } from './types'
 import { bytesOf } from './dtypes'
 
 const BYTES_PER_GB = 1024 ** 3
+
+export function effectiveAttentionLength(rawSeqlen: number, attention: AttentionConfig): number {
+  if (attention.type === 'sliding') return Math.min(rawSeqlen, attention.window)
+  return rawSeqlen
+}
 
 function findVariant(input: CalcInput): GpuVariant {
   const v = input.gpu.variants.find(v => v.id === input.gpuVariantId)
@@ -17,7 +22,8 @@ export function computeMemory(input: CalcInput): MemoryResult {
   const weights = model.paramCount * bytesOf(quant.weights)
   const kvPerTokenPerRequest =
     2 * model.layers * model.numKvHeads * model.headDim * bytesOf(quant.kv)
-  const kvCachePerRequest = kvPerTokenPerRequest * seqlen
+  const effSeqlen = effectiveAttentionLength(seqlen, model.attention)
+  const kvCachePerRequest = kvPerTokenPerRequest * effSeqlen
   const kvCacheTotal = kvCachePerRequest * workload.concurrency
 
   // Coarse: one layer's attention + FFN buffer × small constant.
