@@ -3,8 +3,23 @@
   import { SOURCES, type Source } from '../data/sources'
   import type { PerfTier } from '../engine/types'
 
-  function ms(s: number): string { return (s * 1000).toFixed(2) + ' ms' }
-  function rate(tps: number): string { return tps.toFixed(1) + ' tok/s' }
+  // 3 significant figures, no exponential notation.
+  function sig3(n: number): string {
+    if (n === 0) return '0'
+    return parseFloat(n.toPrecision(3)).toString()
+  }
+  function ms(s: number): string {
+    if (s >= 1)     return `${sig3(s)} s`
+    if (s >= 1e-3)  return `${sig3(s * 1e3)} ms`
+    if (s >= 1e-6)  return `${sig3(s * 1e6)} µs`
+    return `${sig3(s * 1e9)} ns`
+  }
+  function rate(tps: number): string {
+    if (tps >= 1e9) return `${sig3(tps / 1e9)} G tok/s`
+    if (tps >= 1e6) return `${sig3(tps / 1e6)} M tok/s`
+    if (tps >= 1e3) return `${sig3(tps / 1e3)} k tok/s`
+    return `${sig3(tps)} tok/s`
+  }
   function sameSet(a: string[] | undefined, b: string[] | undefined): boolean {
     if (!a || !b) return false
     if (a.length !== b.length) return false
@@ -43,7 +58,7 @@
     <table>
       <thead>
         <tr>
-          <th>Operating point</th>
+          <th>Operating assumption</th>
           <th>TTFT</th>
           <th>Prefill regime</th>
           <th>Decode time / tok</th>
@@ -108,9 +123,21 @@
 {/if}
 
 <style>
-  .perf-panel { margin-top: 1rem; }
-  table { font-variant-numeric: tabular-nums; border-collapse: collapse; }
-  th, td { padding: 0.25rem 0.75rem; text-align: left; border-bottom: 1px solid #eee; }
+  .perf-panel { margin-top: 1rem; overflow-x: auto; }
+  table {
+    font-variant-numeric: tabular-nums; border-collapse: collapse;
+    /* Auto layout sizes each column to its content; nowrap below prevents
+       awkward wraps inside headers and values. */
+  }
+  th, td {
+    padding: 0.25rem 0.75rem; text-align: left;
+    border-bottom: 1px solid #eee; white-space: nowrap;
+  }
+  th { font-weight: 600; color: #333; }
+  /* Numeric value columns: right-align so digits line up. */
+  td:nth-child(2), td:nth-child(4), td:nth-child(6), td:nth-child(7) {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
   .regime { padding: 0.1rem 0.4rem; border-radius: 0.2rem; font-size: 0.85rem; }
   .regime.compute { background: #fde6c8; color: #8a4400; }
   .regime.memory  { background: #c8dcfd; color: #003a8c; }

@@ -1,0 +1,235 @@
+<script lang="ts">
+  import * as Plot from '@observablehq/plot'
+  import { input, result } from './stores'
+
+  let container: HTMLDivElement | undefined = $state(undefined)
+
+  // Each operating tier (Theoretical = peak, Attainable = non-peak) gets its
+  // own roofline AND markers, sharing one color via the tier scale. Markers
+  // sit on their tier's roof by construction — the math computes time as
+  // max(F/C, B/M), so achieved rate is min(C, AI×M), i.e. exactly the roof.
+  type RoofRow = {
+    tier: 'Theoretical' | 'Attainable'
+    ai: number
+    perf: number
+  }
+  type PointRow = {
+    tier: 'Theoretical' | 'Attainable'
+    phase: 'prefill' | 'decode'
+    ai: number
+    perf: number
+    regime: 'compute' | 'memory'
+  }
+  type GapRow = {
+    phase: 'prefill' | 'decode'
+    ai: number
+    perf: number
+  }
+
+  const data = $derived.by(() => {
+    const empty = { roofs: [] as RoofRow[], points: [] as PointRow[],
+                    gaps: [] as GapRow[],
+                    xMin: 0.1, xMax: 1000, yMin: 1e10, yMax: 1e15 }
+    if (!$input || !$result) return empty
+    const variant = $input.gpu.variants.find(v => v.id === $input.gpuVariantId)
+    if (!variant) return empty
+
+    const peakOp = variant.operatingPoints.find(o => o.id === 'peak')
+      ?? variant.operatingPoints[0]
+    if (!peakOp) return empty
+    const peakT = peakOp.tflops[$input.quant.activations]
+    if (peakT === undefined) return empty
+    const peakFlops = peakT * 1e12
+    const peakBw = peakOp.hbmBandwidthGBs * 1e9
+
+    const roofs: RoofRow[] = []
+    const points: PointRow[] = []
+    const gaps: GapRow[] = []
+    const ais: number[] = []
+    const perfs: number[] = []
+
+    for (const op of variant.operatingPoints) {
+      const t = op.tflops[$input.quant.activations]
+      const p = $result.perf[op.id]
+      if (t === undefined || !p) continue
+      const tier: RoofRow['tier'] = op.id === 'peak' ? 'Theoretical' : 'Attainable'
+      const opFlops = t * 1e12
+      const opBw = op.hbmBandwidthGBs * 1e9
+      const opRidge = opFlops / opBw
+
+      // Three anchors per tier: low-x rising segment, ridge, high-x flat.
+      roofs.push({ tier, ai: 1e-3, perf: 1e-3 * opBw })
+      roofs.push({ tier, ai: opRidge, perf: opFlops })
+      roofs.push({ tier, ai: 1e6,    perf: opFlops })
+
+      const prefAi = p.prefill.flops / p.prefill.bytes
+      const prefPerf = p.prefill.flops / p.prefill.timeS
+      const decAi = p.decode.flopsPerStep / p.decode.bytesPerStep
+      const decPerf = p.decode.flopsPerStep / p.decode.timePerTokenS
+
+      points.push({ tier, phase: 'prefill', ai: prefAi, perf: prefPerf, regime: p.prefill.regime })
+      points.push({ tier, phase: 'decode',  ai: decAi,  perf: decPerf,  regime: p.decode.regime })
+
+      // Connector from attainable marker up to peak ceiling at the same AI.
+      // The vertical span is the hardware-efficiency gap for this phase.
+      if (op.id !== 'peak') {
+        const prefCeil = Math.min(peakFlops, prefAi * peakBw)
+        const decCeil  = Math.min(peakFlops, decAi  * peakBw)
+        gaps.push({ phase: 'prefill', ai: prefAi, perf: prefPerf })
+        gaps.push({ phase: 'prefill', ai: prefAi, perf: prefCeil })
+        gaps.push({ phase: 'decode',  ai: decAi,  perf: decPerf })
+        gaps.push({ phase: 'decode',  ai: decAi,  perf: decCeil })
+      }
+
+      ais.push(opRidge, prefAi, decAi)
+      perfs.push(opFlops, prefPerf, decPerf)
+    }
+
+    const xMin = Math.max(0.05, Math.min(...ais) / 3)
+    const xMax = Math.max(...ais) * 3
+    const yMin = Math.min(...perfs) / 5
+    const yMax = Math.max(...perfs) * 2
+    return { roofs, points, gaps, xMin, xMax, yMin, yMax }
+  })
+
+  function fmtPerf(v: number): string {
+    if (v >= 1e15) return `${(v / 1e15).toFixed(1)} PFLOPS`
+    if (v >= 1e12) return `${(v / 1e12).toFixed(0)} TFLOPS`
+    if (v >= 1e9)  return `${(v / 1e9).toFixed(0)} GFLOPS`
+    return `${v.toExponential(1)} F`
+  }
+
+  const hasAttainable = $derived(data.points.some(p => p.tier === 'Attainable'))
+
+  const chart = $derived.by(() => {
+    if (data.roofs.length === 0) return null
+    return Plot.plot({
+      width: 640, height: 380,
+      marginLeft: 70, marginBottom: 50, marginRight: 24, marginTop: 24,
+      x: {
+        type: 'log',
+        domain: [data.xMin, data.xMax],
+        label: 'Arithmetic intensity (FLOPs/byte) →',
+        grid: true
+      },
+      y: {
+        type: 'log',
+        domain: [data.yMin, data.yMax],
+        label: '↑ Performance',
+        tickFormat: (d: number) => fmtPerf(d),
+        grid: true
+      },
+      color: {
+        // We render our own legend below the chart so the swatch can match
+        // the actual stroke style (solid for Theoretical, dashed for Attainable).
+        legend: false,
+        domain: ['Theoretical', 'Attainable'],
+        range: ['#888', '#e07a1f']
+      },
+      symbol: {
+        legend: false,
+        domain: ['prefill', 'decode'],
+        range: ['square', 'circle']
+      },
+      marks: [
+        // Theoretical-peak roofline (solid). z: 'tier' groups so the segments
+        // join correctly even when the Attainable filter strips them.
+        Plot.line(data.roofs.filter(r => r.tier === 'Theoretical'), {
+          x: 'ai', y: 'perf', stroke: 'tier', strokeWidth: 2
+        }),
+        // Attainable roofline (dashed) — separate mark so we can dash it.
+        Plot.line(data.roofs.filter(r => r.tier === 'Attainable'), {
+          x: 'ai', y: 'perf', stroke: 'tier', strokeWidth: 2, strokeDasharray: '6 4'
+        }),
+        // Gap connectors from attainable points up to the peak ceiling at their AI.
+        Plot.line(data.gaps, {
+          x: 'ai', y: 'perf', stroke: '#bbb', strokeWidth: 1, strokeDasharray: '2 3', z: 'phase'
+        }),
+        Plot.dot(data.points, {
+          x: 'ai', y: 'perf',
+          stroke: 'tier', fill: 'tier', symbol: 'phase',
+          r: 7, strokeWidth: 1.5,
+          // Custom channels give the tooltip its own labels — independent of
+          // the axis titles — and a controlled display order (Performance,
+          // then a blank spacer, then the rest).
+          channels: {
+            Performance: { value: 'perf', label: 'Performance' },
+            ' ': { value: () => '', label: ' ' },
+            'Arithmetic Intensity': { value: 'ai', label: 'Arithmetic Intensity' }
+          },
+          tip: {
+            format: {
+              x: false, y: false,
+              stroke: false, fill: false,
+              Performance: (d: number) => fmtPerf(d) + '/s',
+              'Arithmetic Intensity': '.3~f'
+            }
+          }
+        })
+      ]
+    })
+  })
+
+  $effect(() => {
+    if (!container) return
+    container.replaceChildren()
+    if (chart) container.appendChild(chart)
+  })
+</script>
+
+{#if data.roofs.length > 0}
+  <section class="roofline">
+    <h3>Roofline</h3>
+    <p class="caption">
+      Roof = theoretical ceiling at peak {$input?.quant.activations} (sloped = memory-bound,
+      flat = compute-bound). Markers are the workload's prefill and decode; the gap between
+      the attainable marker and the roof above it is the hardware-efficiency loss.
+    </p>
+    <div bind:this={container} class="plot"></div>
+    <div class="legend">
+      {#if hasAttainable}
+        <span class="entry">
+          <svg class="line-swatch" viewBox="0 0 22 10" aria-hidden="true">
+            <line x1="1" y1="5" x2="21" y2="5" stroke="#888" stroke-width="2"/>
+          </svg>
+          <span>Theoretical</span>
+        </span>
+        <span class="entry">
+          <svg class="line-swatch" viewBox="0 0 22 10" aria-hidden="true">
+            <line x1="1" y1="5" x2="21" y2="5" stroke="#e07a1f" stroke-width="2" stroke-dasharray="6 4"/>
+          </svg>
+          <span>Attainable</span>
+        </span>
+      {/if}
+      <span class="entry">
+        <svg class="shape-swatch" viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="1" y="1" width="10" height="10" fill="#888" stroke="#fff" stroke-width="1"/>
+        </svg>
+        <span>prefill</span>
+      </span>
+      <span class="entry">
+        <svg class="shape-swatch" viewBox="0 0 12 12" aria-hidden="true">
+          <circle cx="6" cy="6" r="5" fill="#888" stroke="#fff" stroke-width="1"/>
+        </svg>
+        <span>decode</span>
+      </span>
+    </div>
+  </section>
+{/if}
+
+<style>
+  .roofline { margin-top: 1.5rem; }
+  h3 { margin-bottom: 0.25rem; }
+  .caption {
+    font-size: 0.85rem; color: #555; margin: 0 0 0.5rem; font-style: italic;
+  }
+  .plot { max-width: 100%; overflow-x: auto; }
+  .plot :global(svg) { max-width: 100%; height: auto; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem;
+    margin-top: 0.4rem; font-size: 0.85rem; color: #333;
+  }
+  .entry { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .line-swatch { width: 22px; height: 10px; }
+  .shape-swatch { width: 12px; height: 12px; }
+</style>
