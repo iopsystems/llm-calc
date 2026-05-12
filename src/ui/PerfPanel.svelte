@@ -58,29 +58,35 @@
     <table>
       <thead>
         <tr>
-          <th>Operating assumption</th>
-          <th>TTFT</th>
-          <th>Prefill regime</th>
-          <th>Decode time / tok</th>
-          <th>Decode regime</th>
-          <th>Input tok/s</th>
-          <th>Output tok/s (aggregate)</th>
+          <th rowspan="2">Operating assumption</th>
+          <th rowspan="2">TTFT</th>
+          <th colspan="2" class="group-header">Bottleneck</th>
+          <th rowspan="2">Decode time / tok</th>
+          <th rowspan="2">Input tok/s</th>
+          <th colspan="2" class="group-header">Output tok/s</th>
+        </tr>
+        <tr>
+          <th class="sub-header">Prefill</th>
+          <th class="sub-header">Decode</th>
+          <th class="sub-header">per stream</th>
+          <th class="sub-header">total</th>
         </tr>
       </thead>
       <tbody>
         {#each Object.entries($result.perf) as [id, p]}
           {@const c = citationsFor(p)}
           <tr>
-            <td>
+            <td data-label="Operating assumption">
               {id}
               {#each c.allMarks as n}<sup class="cite"><a href="#ref-{id}-{n}">[{n}]</a></sup>{/each}
             </td>
-            <td>{ms(p.ttftS)}</td>
-            <td><span class="regime {p.prefill.regime}">{p.prefill.regime}</span></td>
-            <td>{ms(p.decode.timePerTokenS)}</td>
-            <td><span class="regime {p.decode.regime}">{p.decode.regime}</span></td>
-            <td>{rate(p.inputTokenRate)}</td>
-            <td>{rate(p.outputTokenRate)}</td>
+            <td data-label="TTFT">{ms(p.ttftS)}</td>
+            <td data-label="Prefill bottleneck"><span class="regime {p.prefill.regime}">{p.prefill.regime}</span></td>
+            <td data-label="Decode bottleneck"><span class="regime {p.decode.regime}">{p.decode.regime}</span></td>
+            <td data-label="Decode time / tok">{ms(p.decode.timePerTokenS)}</td>
+            <td data-label="Input tok/s">{rate(p.inputTokenRate)}</td>
+            <td data-label="Output per stream">{rate(1 / p.decode.timePerTokenS)}</td>
+            <td data-label="Output total">{rate(p.outputTokenRate)}</td>
           </tr>
         {/each}
       </tbody>
@@ -123,24 +129,71 @@
 {/if}
 
 <style>
-  .perf-panel { margin-top: 1rem; overflow-x: auto; }
-  table {
-    font-variant-numeric: tabular-nums; border-collapse: collapse;
-    /* Auto layout sizes each column to its content; nowrap below prevents
-       awkward wraps inside headers and values. */
-  }
+  .perf-panel { margin-top: 1rem; }
+  table { font-variant-numeric: tabular-nums; border-collapse: collapse; }
   th, td {
-    padding: 0.25rem 0.75rem; text-align: left;
-    border-bottom: 1px solid #eee; white-space: nowrap;
+    padding: 0.2rem 0.5rem; text-align: left;
+    border-bottom: 1px solid #eee;
   }
-  th { font-weight: 600; color: #333; }
-  /* Numeric value columns: right-align so digits line up. */
-  td:nth-child(2), td:nth-child(4), td:nth-child(6), td:nth-child(7) {
-    text-align: right; font-variant-numeric: tabular-nums;
+  /* Values stay single-line so numbers don't break mid-unit. */
+  td { white-space: nowrap; }
+  /* Headers may wrap so the table doesn't need horizontal scrolling. */
+  th {
+    font-weight: 600; color: #333;
+    white-space: normal; vertical-align: bottom;
+    line-height: 1.2;
+  }
+  /* Group header "Bottleneck" sits centered over its two sub-columns. */
+  th.group-header {
+    text-align: center; border-bottom: 1px solid #ccc;
+    padding-bottom: 0.15rem;
+  }
+  /* Sub-headers (Prefill / Decode) are smaller and less heavy than the
+     primary header row. Force right-align — :not(:first-child) above
+     wouldn't apply to "Prefill" since it's the first cell in its own row. */
+  th.sub-header {
+    font-weight: 500; font-size: 0.85em; color: #666;
+    padding-top: 0.15rem; text-align: right;
+  }
+  /* Output columns (everything except the operating-assumption label):
+     right-align so numbers and labels stack to a common edge. */
+  th:not(:first-child), td:not(:first-child) {
+    text-align: right;
   }
   .regime { padding: 0.1rem 0.4rem; border-radius: 0.2rem; font-size: 0.85rem; }
   .regime.compute { background: #fde6c8; color: #8a4400; }
   .regime.memory  { background: #c8dcfd; color: #003a8c; }
+  /* On narrow viewports, transpose the table to one card per operating point.
+     Each cell becomes a labeled key/value row using its data-label attribute. */
+  @media (max-width: 640px) {
+    table { display: block; }
+    thead { display: none; }
+    tbody { display: block; }
+    tr {
+      display: block;
+      border: 1px solid #ddd; border-radius: 0.25rem;
+      padding: 0.4rem 0.6rem; margin-bottom: 0.5rem;
+      background: #fff;
+    }
+    td {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.2rem 0; border-bottom: none; text-align: right;
+    }
+    td::before {
+      content: attr(data-label);
+      font-weight: 600; color: #555; text-align: left;
+      margin-right: 0.75rem;
+    }
+    /* First cell (operating assumption identifier) is the card title;
+       drop the data-label prefix and emphasize the id text. */
+    td:first-child {
+      font-weight: 700; font-size: 1rem;
+      padding-bottom: 0.35rem; margin-bottom: 0.35rem;
+      border-bottom: 1px solid #eee;
+      justify-content: flex-start;
+    }
+    td:first-child::before { content: none; }
+  }
   .cite a { text-decoration: none; color: #003a8c; }
   .cite a:hover { text-decoration: underline; }
   .refs { margin-top: 0.75rem; font-size: 0.85rem; color: #444; }

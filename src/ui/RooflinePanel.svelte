@@ -1,20 +1,21 @@
 <script lang="ts">
   import * as Plot from '@observablehq/plot'
   import { input, result } from './stores'
+  import { PLOT_STYLE } from './plotDefaults'
 
   let container: HTMLDivElement | undefined = $state(undefined)
 
-  // Each operating tier (Theoretical = peak, Attainable = non-peak) gets its
+  // Each operating tier (Theoretical = peak, Achievable = non-peak) gets its
   // own roofline AND markers, sharing one color via the tier scale. Markers
   // sit on their tier's roof by construction — the math computes time as
   // max(F/C, B/M), so achieved rate is min(C, AI×M), i.e. exactly the roof.
   type RoofRow = {
-    tier: 'Theoretical' | 'Attainable'
+    tier: 'Theoretical' | 'Achievable'
     ai: number
     perf: number
   }
   type PointRow = {
-    tier: 'Theoretical' | 'Attainable'
+    tier: 'Theoretical' | 'Achievable'
     phase: 'prefill' | 'decode'
     ai: number
     perf: number
@@ -28,7 +29,7 @@
 
   const data = $derived.by(() => {
     const empty = { roofs: [] as RoofRow[], points: [] as PointRow[],
-                    gaps: [] as GapRow[],
+                    gaps: [] as GapRow[], ridge: 1,
                     xMin: 0.1, xMax: 1000, yMin: 1e10, yMax: 1e15 }
     if (!$input || !$result) return empty
     const variant = $input.gpu.variants.find(v => v.id === $input.gpuVariantId)
@@ -52,7 +53,7 @@
       const t = op.tflops[$input.quant.activations]
       const p = $result.perf[op.id]
       if (t === undefined || !p) continue
-      const tier: RoofRow['tier'] = op.id === 'peak' ? 'Theoretical' : 'Attainable'
+      const tier: RoofRow['tier'] = op.id === 'peak' ? 'Theoretical' : 'Achievable'
       const opFlops = t * 1e12
       const opBw = op.hbmBandwidthGBs * 1e9
       const opRidge = opFlops / opBw
@@ -70,7 +71,7 @@
       points.push({ tier, phase: 'prefill', ai: prefAi, perf: prefPerf, regime: p.prefill.regime })
       points.push({ tier, phase: 'decode',  ai: decAi,  perf: decPerf,  regime: p.decode.regime })
 
-      // Connector from attainable marker up to peak ceiling at the same AI.
+      // Connector from achievable marker up to peak ceiling at the same AI.
       // The vertical span is the hardware-efficiency gap for this phase.
       if (op.id !== 'peak') {
         const prefCeil = Math.min(peakFlops, prefAi * peakBw)
@@ -89,7 +90,10 @@
     const xMax = Math.max(...ais) * 3
     const yMin = Math.min(...perfs) / 5
     const yMax = Math.max(...perfs) * 2
-    return { roofs, points, gaps, xMin, xMax, yMin, yMax }
+    // Theoretical ridge — splits memory-bound (AI < ridge) from compute-bound
+    // (AI > ridge). Used by the background shading.
+    const ridge = peakFlops / peakBw
+    return { roofs, points, gaps, ridge, xMin, xMax, yMin, yMax }
   })
 
   function fmtPerf(v: number): string {
@@ -99,13 +103,16 @@
     return `${v.toExponential(1)} F`
   }
 
-  const hasAttainable = $derived(data.points.some(p => p.tier === 'Attainable'))
+  const hasAchievable = $derived(data.points.some(p => p.tier === 'Achievable'))
 
   const chart = $derived.by(() => {
     if (data.roofs.length === 0) return null
     return Plot.plot({
       width: 640, height: 380,
-      marginLeft: 70, marginBottom: 50, marginRight: 24, marginTop: 24,
+      // marginLeft bumped from 70 → 100 so longer y-tick labels like
+      // "1.0 PFLOPS/s" fit without clipping.
+      marginLeft: 100, marginBottom: 50, marginRight: 24, marginTop: 24,
+      style: PLOT_STYLE,
       x: {
         type: 'log',
         domain: [data.xMin, data.xMax],
@@ -121,10 +128,13 @@
       },
       color: {
         // We render our own legend below the chart so the swatch can match
-        // the actual stroke style (solid for Theoretical, dashed for Attainable).
+        // the actual stroke style (solid for Theoretical, dashed for Achievable).
         legend: false,
-        domain: ['Theoretical', 'Attainable'],
-        range: ['#888', '#e07a1f']
+        domain: ['Theoretical', 'Achievable'],
+        // Green avoids collision with the compute-regime badge (orange) and
+        // the memory-regime badge (blue), so the Achievable color doesn't
+        // accidentally suggest a particular bottleneck.
+        range: ['#888', '#21a87a']
       },
       symbol: {
         legend: false,
@@ -132,22 +142,37 @@
         range: ['square', 'circle']
       },
       marks: [
-        // Theoretical-peak roofline (solid). z: 'tier' groups so the segments
-        // join correctly even when the Attainable filter strips them.
+        // Background shading by regime — drawn first so it sits behind the
+        // rooflines and markers. Tints reuse the regime-badge palette
+        // (light blue for memory, light orange for compute) so the visual
+        // language is consistent between the chart and the perf table.
+        Plot.rect([
+          { x1: data.xMin, x2: data.ridge, y1: data.yMin, y2: data.yMax }
+        ], { x1: 'x1', x2: 'x2', y1: 'y1', y2: 'y2',
+             fill: '#c8dcfd', fillOpacity: 0.25, stroke: null, clip: true }),
+        Plot.rect([
+          { x1: data.ridge, x2: data.xMax, y1: data.yMin, y2: data.yMax }
+        ], { x1: 'x1', x2: 'x2', y1: 'y1', y2: 'y2',
+             fill: '#fde6c8', fillOpacity: 0.25, stroke: null, clip: true }),
+        // Theoretical-peak roofline (solid). The roof anchors extend well
+        // beyond the visible domain (so the rising/flat segments span the
+        // whole plot regardless of where the data falls); clip: true trims
+        // the rendered stroke to the plot frame.
         Plot.line(data.roofs.filter(r => r.tier === 'Theoretical'), {
-          x: 'ai', y: 'perf', stroke: 'tier', strokeWidth: 2
+          x: 'ai', y: 'perf', stroke: 'tier', strokeWidth: 2, clip: true
         }),
-        // Attainable roofline (dashed) — separate mark so we can dash it.
-        Plot.line(data.roofs.filter(r => r.tier === 'Attainable'), {
-          x: 'ai', y: 'perf', stroke: 'tier', strokeWidth: 2, strokeDasharray: '6 4'
+        // Achievable roofline (dashed) — separate mark so we can dash it.
+        Plot.line(data.roofs.filter(r => r.tier === 'Achievable'), {
+          x: 'ai', y: 'perf', stroke: 'tier', strokeWidth: 2, strokeDasharray: '6 4', clip: true
         }),
-        // Gap connectors from attainable points up to the peak ceiling at their AI.
+        // Gap connectors from achievable points up to the peak ceiling at their AI.
         Plot.line(data.gaps, {
-          x: 'ai', y: 'perf', stroke: '#bbb', strokeWidth: 1, strokeDasharray: '2 3', z: 'phase'
+          x: 'ai', y: 'perf', stroke: '#bbb', strokeWidth: 1,
+          strokeDasharray: '2 3', z: 'phase', clip: true
         }),
         Plot.dot(data.points, {
           x: 'ai', y: 'perf',
-          stroke: 'tier', fill: 'tier', symbol: 'phase',
+          stroke: 'tier', fill: 'tier', fillOpacity: 0.7, symbol: 'phase',
           r: 7, strokeWidth: 1.5,
           // Custom channels give the tooltip its own labels — independent of
           // the axis titles — and a controlled display order (Performance,
@@ -183,11 +208,11 @@
     <p class="caption">
       Roof = theoretical ceiling at peak {$input?.quant.activations} (sloped = memory-bound,
       flat = compute-bound). Markers are the workload's prefill and decode; the gap between
-      the attainable marker and the roof above it is the hardware-efficiency loss.
+      the achievable marker and the roof above it is the hardware-efficiency loss.
     </p>
     <div bind:this={container} class="plot"></div>
     <div class="legend">
-      {#if hasAttainable}
+      {#if hasAchievable}
         <span class="entry">
           <svg class="line-swatch" viewBox="0 0 22 10" aria-hidden="true">
             <line x1="1" y1="5" x2="21" y2="5" stroke="#888" stroke-width="2"/>
@@ -196,9 +221,9 @@
         </span>
         <span class="entry">
           <svg class="line-swatch" viewBox="0 0 22 10" aria-hidden="true">
-            <line x1="1" y1="5" x2="21" y2="5" stroke="#e07a1f" stroke-width="2" stroke-dasharray="6 4"/>
+            <line x1="1" y1="5" x2="21" y2="5" stroke="#21a87a" stroke-width="2" stroke-dasharray="6 4"/>
           </svg>
-          <span>Attainable</span>
+          <span>Achievable</span>
         </span>
       {/if}
       <span class="entry">
@@ -223,11 +248,12 @@
   .caption {
     font-size: 0.85rem; color: #555; margin: 0 0 0.5rem; font-style: italic;
   }
-  .plot { max-width: 100%; overflow-x: auto; }
-  .plot :global(svg) { max-width: 100%; height: auto; }
+  .plot { max-width: 100%; overflow-x: auto; text-align: center; }
+  .plot :global(svg) { max-width: 100%; height: auto; display: inline-block; }
   .legend {
     display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem;
-    margin-top: 0.4rem; font-size: 0.85rem; color: #333;
+    margin-top: 0.4rem; padding-left: 100px;
+    font-size: 0.85rem; color: #333;
   }
   .entry { display: inline-flex; align-items: center; gap: 0.35rem; }
   .line-swatch { width: 22px; height: 10px; }
