@@ -17,6 +17,10 @@ export function kvBytesPerTokenPerLayer(model: ModelArch, kvDtype: Dtype): numbe
   if (att.type === 'linear-mla-hybrid') {
     return (att.kvLoraRank + att.qkRopeHeadDim) * bytesOf(kvDtype)
   }
+  if (att.type === 'delta-hybrid') {
+    // DeltaNet layers: no KV cache. Only Gated Attention layers store KV.
+    return 2 * model.numKvHeads * model.headDim * bytesOf(kvDtype)
+  }
   if (att.type === 'csa-hca-hybrid') {
     return 2 * model.numKvHeads * model.headDim * bytesOf(kvDtype)
   }
@@ -27,6 +31,7 @@ export function attentionDim(model: ModelArch): number {
   const att = model.attention
   if (att.type === 'mla' || att.type === 'mla-dsa') return att.kvLoraRank + att.qkRopeHeadDim
   if (att.type === 'linear-mla-hybrid') return att.kvLoraRank + att.qkRopeHeadDim
+  if (att.type === 'delta-hybrid') return model.numHeads * model.headDim
   if (att.type === 'csa-hca-hybrid') return model.numHeads * model.headDim
   return model.numHeads * model.headDim
 }
@@ -51,6 +56,17 @@ export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number,
         `${att.numLinearLayers} + ${att.numFullLayers} ≠ ${model.layers}`
       )
     }
+    return att.numFullLayers * seqlen
+  }
+  if (att.type === 'delta-hybrid') {
+    if (att.numDeltaNetLayers + att.numFullLayers !== model.layers) {
+      throw new Error(
+        `delta-hybrid layer counts must sum to model.layers: ` +
+        `${att.numDeltaNetLayers} + ${att.numFullLayers} ≠ ${model.layers}`
+      )
+    }
+    // DeltaNet layers: no attention over sequence (constant-time state update).
+    // Gated Attention layers: full sequence attention.
     return att.numFullLayers * seqlen
   }
   if (att.type === 'csa-hca-hybrid') {
@@ -84,6 +100,22 @@ export function linearAttentionFlopsPerToken(model: ModelArch): number {
   return 2 * a.numLinearLayers * a.numLinearHeads * a.linearHeadDim * a.linearHeadDim
 }
 
+// Constant per-request state bytes from DeltaNet (Gated DeltaNet) layers. Zero for non-DeltaNet models.
+export function deltaStateBytes(model: ModelArch, kvDtype: Dtype): number {
+  const att = model.attention
+  if (att.type !== 'delta-hybrid') return 0
+  // State matrix per DeltaNet layer: numDeltaNetHeads × deltaHeadDim²
+  return att.numDeltaNetLayers * att.numDeltaNetHeads * att.deltaHeadDim * att.deltaHeadDim * bytesOf(kvDtype)
+}
+
+// FLOPs per token from DeltaNet layers (constant in seqlen). Zero for non-DeltaNet models.
+export function deltaAttentionFlopsPerToken(model: ModelArch): number {
+  const att = model.attention
+  if (att.type !== 'delta-hybrid') return 0
+  // Per-layer DeltaNet FLOPs ≈ 2 × numDeltaNetHeads × deltaHeadDim²
+  return 2 * att.numDeltaNetLayers * att.numDeltaNetHeads * att.deltaHeadDim * att.deltaHeadDim
+}
+
 function findVariant(input: CalcInput): AcceleratorVariant {
   const v = input.accelerator.variants.find(v => v.id === input.acceleratorVariantId)
   if (!v) throw new Error(`Variant ${input.acceleratorVariantId} not in ${input.accelerator.id}`)
@@ -101,6 +133,7 @@ export function computeMemory(input: CalcInput): MemoryResult {
   const kvCachePerRequest =
     kvPerLayerPerToken * attendedSeqlen
     + linearAttentionStateBytes(model, quant.kv)
+    + deltaStateBytes(model, quant.kv)
   const kvCacheTotal = kvCachePerRequest * workload.concurrency
 
   // Coarse: one layer's attention + FFN buffer × small constant.

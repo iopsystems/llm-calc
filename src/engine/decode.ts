@@ -5,7 +5,9 @@ import {
   activeParams,
   attentionDim,
   linearAttentionFlopsPerToken,
-  linearAttentionStateBytes
+  linearAttentionStateBytes,
+  deltaStateBytes,
+  deltaAttentionFlopsPerToken
 } from './memory'
 import { bytesOf } from './dtypes'
 
@@ -20,12 +22,14 @@ export function computeDecode(
   const flopsPerStep =
     (2 * activeParams(model)
      + 2 * attendedSeqlenSummedOverLayers(model, avgSeqlen) * attentionDim(model)
-     + linearAttentionFlopsPerToken(model)) *
+     + linearAttentionFlopsPerToken(model)
+     + deltaAttentionFlopsPerToken(model)) *
     workload.concurrency
   const bytesPerStep =
     activeParams(model) * bytesOf(quant.weights) +
     memory.kvCachePerRequest * workload.concurrency +
-    linearAttentionStateBytes(model, quant.kv) * workload.concurrency  // KDA state write-back
+    linearAttentionStateBytes(model, quant.kv) * workload.concurrency +  // KDA state write-back
+    deltaStateBytes(model, quant.kv) * workload.concurrency  // DeltaNet state write-back
 
   const tflops = opPoint.tflops[quant.activations]
   if (tflops === undefined) {

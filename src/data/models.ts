@@ -111,6 +111,158 @@ export const MODELS: ModelArch[] = [
       activeParamCount: 35_000_000_000
     }
   },
+  // === Qwen3.5 dense series (Gated DeltaNet + Gated Attention hybrid) ===
+  {
+    id: 'qwen3.5-0.8b', name: 'Qwen3.5-0.8B', family: 'qwen3.5',
+    layers: 24, hiddenDim: 1024, intermediateDim: 3584,
+    numHeads: 8, numKvHeads: 2, headDim: 256, vocabSize: 248320,
+    paramCount: 830_000_000,
+    numNextnLayers: 0,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 18, numFullLayers: 6,
+      numDeltaNetHeads: 16, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: { type: 'dense' }
+  },
+  {
+    id: 'qwen3.5-2b', name: 'Qwen3.5-2B', family: 'qwen3.5',
+    layers: 24, hiddenDim: 2048, intermediateDim: 6144,
+    numHeads: 8, numKvHeads: 2, headDim: 256, vocabSize: 248320,
+    paramCount: 2_240_000_000,
+    numNextnLayers: 0,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 18, numFullLayers: 6,
+      numDeltaNetHeads: 16, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: { type: 'dense' }
+  },
+  {
+    id: 'qwen3.5-4b', name: 'Qwen3.5-4B', family: 'qwen3.5',
+    layers: 32, hiddenDim: 2560, intermediateDim: 9216,
+    numHeads: 16, numKvHeads: 4, headDim: 256, vocabSize: 248320,
+    paramCount: 4_240_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 24, numFullLayers: 8,
+      numDeltaNetHeads: 32, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: { type: 'dense' }
+  },
+  {
+    id: 'qwen3.5-8b', name: 'Qwen3.5-8B', family: 'qwen3.5',
+    layers: 32, hiddenDim: 4096, intermediateDim: 12288,
+    numHeads: 16, numKvHeads: 2, headDim: 256, vocabSize: 248320,
+    paramCount: 8_460_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 24, numFullLayers: 8,
+      numDeltaNetHeads: 32, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: { type: 'dense' }
+  },
+  {
+    id: 'qwen3.5-9b', name: 'Qwen3.5-9B', family: 'qwen3.5',
+    layers: 32, hiddenDim: 4096, intermediateDim: 12288,
+    numHeads: 16, numKvHeads: 4, headDim: 256, vocabSize: 248320,
+    paramCount: 9_300_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 24, numFullLayers: 8,
+      numDeltaNetHeads: 32, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: { type: 'dense' }
+  },
+  // === Qwen3.5 MoE series (Gated DeltaNet + Gated Attention hybrid) ===
+  {
+    id: 'qwen3.5-27b', name: 'Qwen3.5-27B', family: 'qwen3.5',
+    layers: 64, hiddenDim: 5120, intermediateDim: 17408,
+    numHeads: 24, numKvHeads: 4, headDim: 256, vocabSize: 248320,
+    paramCount: 27_000_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 48, numFullLayers: 16,
+      numDeltaNetHeads: 64, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 128,
+      numExpertsActive: 8,
+      numSharedExperts: 0,
+      activeParamCount: 2_700_000_000
+    }
+  },
+  {
+    id: 'qwen3.5-35b-a3b', name: 'Qwen3.5-35B-A3B', family: 'qwen3.5',
+    layers: 40, hiddenDim: 2048, intermediateDim: 768,
+    numHeads: 16, numKvHeads: 2, headDim: 256, vocabSize: 248320,
+    paramCount: 35_000_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 30, numFullLayers: 10,
+      numDeltaNetHeads: 64, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 256,
+      numExpertsActive: 8,
+      numSharedExperts: 1,
+      activeParamCount: 3_300_000_000
+    }
+  },
+  {
+    id: 'qwen3.5-122b-a10b', name: 'Qwen3.5-122B-A10B', family: 'qwen3.5',
+    layers: 48, hiddenDim: 3072, intermediateDim: 1024,
+    numHeads: 32, numKvHeads: 2, headDim: 256, vocabSize: 248320,
+    paramCount: 122_000_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 36, numFullLayers: 12,
+      numDeltaNetHeads: 64, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 256,
+      numExpertsActive: 8,
+      numSharedExperts: 1,
+      activeParamCount: 10_000_000_000
+    }
+  },
+  {
+    id: 'qwen3.5-397b-a17b', name: 'Qwen3.5-397B-A17B', family: 'qwen3.5',
+    layers: 60, hiddenDim: 4096, intermediateDim: 1024,
+    numHeads: 32, numKvHeads: 2, headDim: 256, vocabSize: 248320,
+    paramCount: 397_000_000_000,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 45, numFullLayers: 15,
+      numDeltaNetHeads: 64, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 512,
+      numExpertsActive: 10,
+      numSharedExperts: 1,
+      activeParamCount: 17_000_000_000
+    }
+  },
   // === Llama ===
   {
     id: 'llama-3.3-70b', name: 'Llama 3.3 70B', family: 'llama-3',
@@ -373,7 +525,6 @@ export const MODELS: ModelArch[] = [
     layers: 78, hiddenDim: 6144, intermediateDim: 12288,
     numHeads: 64, numKvHeads: 64, headDim: 256, vocabSize: 154880,
     paramCount: 744_000_000_000,
-    numNextnLayers: 0,
     attention: {
       type: 'mla-dsa',
       kvLoraRank: 512, qkRopeHeadDim: 64,
@@ -386,7 +537,8 @@ export const MODELS: ModelArch[] = [
       numExpertsActive: 8,
       numSharedExperts: 1,
       activeParamCount: 40_000_000_000
-    }
+    },
+    numNextnLayers: 0
   },
   // === Phi ===
   {

@@ -550,3 +550,126 @@ describe('calculate — DeepSeek V4 integration', () => {
     expect(r.perf['peak'].decode.regime).toBe('memory')
   })
 })
+
+describe('calculate — Qwen3.5 delta-hybrid integration', () => {
+  const h100 = ACCELERATORS.find(a => a.id === 'h100')!
+
+  it('Qwen3.5-4B at 32k prompt: KV cache uses only 8 Gated Attention layers; DeltaNet state adds ~24 MB', () => {
+    const qwen = MODELS.find(m => m.id === 'qwen3.5-4b')!
+    const input: CalcInput = {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: qwen,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
+    }
+    const r = calculate(input)
+    // KV per token = 2 × 4 × 256 × 2 = 4096 bytes
+    // attendedSeq = 8 × 32768 = 262144 (only full layers)
+    // KV cache = 4096 × 262144 = 1_073_741_824 ≈ 1.07 GB
+    const kv = 4096 * 262144
+    // DeltaNet state = 24 × 32 × 128² × 2 = 25_165_824 ≈ 24 MB
+    const state = 24 * 32 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(kv + state)
+    // Sanity: full-attention equivalent ≈ 4× larger (32 layers vs 8 full layers)
+    const fullEq = 2 * 32 * 4 * 256 * 2 * 32768
+    expect(fullEq / r.memory.kvCachePerRequest).toBeGreaterThan(3.5)
+    expect(fullEq / r.memory.kvCachePerRequest).toBeLessThan(4.5)
+  })
+
+  it('Qwen3.5-397B-A17B at 32k prompt: large MoE with delta-hybrid attention', () => {
+    const qwen = MODELS.find(m => m.id === 'qwen3.5-397b-a17b')!
+    const input: CalcInput = {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: qwen,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
+    }
+    const r = calculate(input)
+    // 397B × 2 bytes ≈ 794 GB → vastly exceeds single H100
+    expect(r.memory.weights / 1e9).toBeCloseTo(794, 0)
+    expect(r.memory.fits).toBe(false)
+    // KV cache: only 15 full layers
+    // KV = 2 × 2 × 256 × 2 × 15 × 32768 = 251_658_240 ≈ 240 MB
+    // State = 45 × 64 × 128² × 2 = 94_371_840 ≈ 90 MB
+    const kv = 2 * 2 * 256 * 2 * 15 * 32768
+    const state = 45 * 64 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(kv + state)
+  })
+
+  it('Qwen3.5-397B-A17B decode uses activeParams (17B), not paramCount (397B)', () => {
+    const qwen = MODELS.find(m => m.id === 'qwen3.5-397b-a17b')!
+    const input: CalcInput = {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: qwen,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 2048, outputTokens: 512, concurrency: 1 }
+    }
+    const r = calculate(input)
+    // decode.bytesPerStep ≈ 17B × 2 = 34 GB (active params) + KV + state
+    const activeBytes = 17_000_000_000 * 2
+    expect(r.perf['peak'].decode.bytesPerStep).toBeGreaterThan(activeBytes)
+    expect(r.perf['peak'].decode.bytesPerStep).toBeLessThan(activeBytes + 2e9)
+    expect(r.perf['peak'].decode.regime).toBe('memory')
+  })
+
+  it('Qwen3.5-27B at 32k prompt: MoE with delta-hybrid attention', () => {
+    const qwen = MODELS.find(m => m.id === 'qwen3.5-27b')!
+    const input: CalcInput = {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: qwen,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
+    }
+    const r = calculate(input)
+    // KV: only 16 full layers × 32768
+    // KV per token = 2 × 4 × 256 × 2 = 4096
+    // KV cache = 4096 × 16 × 32768 = 2_147_483_648 ≈ 2.15 GB
+    const kv = 4096 * 16 * 32768
+    // State = 48 × 64 × 128² × 2 = 100_663_296 ≈ 96 MB
+    const state = 48 * 64 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(kv + state)
+  })
+
+  it('Qwen3.5-9B at 64k prompt: KV cache ratio vs full attention ≈ 4× (8/32 layers)', () => {
+    const qwen = MODELS.find(m => m.id === 'qwen3.5-9b')!
+    const input: CalcInput = {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: qwen,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 65536, outputTokens: 0, concurrency: 1 }
+    }
+    const r = calculate(input)
+    // KV: 8 full layers × 65536
+    // KV per token = 2 × 4 × 256 × 2 = 4096
+    const kv = 4096 * 8 * 65536
+    // State = 24 × 32 × 128² × 2 = 25_165_824 ≈ 24 MB
+    const state = 24 * 32 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(kv + state)
+    // Sanity: full-attention equiv = 2 × 32 × 4 × 256 × 2 × 65536
+    const fullEq = 2 * 32 * 4 * 256 * 2 * 65536
+    const ratio = fullEq / r.memory.kvCachePerRequest
+    expect(ratio).toBeGreaterThan(3.5)
+    expect(ratio).toBeLessThan(4.5)  // asymptote = 32/8 = 4, state adds small overhead
+  })
+
+  it('Qwen3.5-4B at 8k is memory-bound on decode (4B dense)', () => {
+    const qwen = MODELS.find(m => m.id === 'qwen3.5-4b')!
+    const input: CalcInput = {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: qwen,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 8192, outputTokens: 512, concurrency: 1 }
+    }
+    const r = calculate(input)
+    // 4.24B × 2 ≈ 8.48 GB → fits in H100 SXM-80
+    expect(r.memory.weights / 1e9).toBeCloseTo(8.48, 1)
+    expect(r.memory.fits).toBe(true)
+    expect(r.perf['peak'].decode.regime).toBe('memory')
+  })
+})

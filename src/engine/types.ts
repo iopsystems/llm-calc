@@ -320,6 +320,18 @@ export type AttentionConfig =
       // HCA params
       hcaCompressionM: number
     }
+  | { type: 'delta-hybrid';
+      // Qwen3.5: Gated DeltaNet (linear/state-space) + Gated Attention (RoPE)
+      // Per-layer counts (must sum to model.layers)
+      numDeltaNetLayers: number;
+      numFullLayers: number;
+      // DeltaNet linear-attention geometry (state = numDeltaNetHeads × deltaHeadDim² per layer)
+      numDeltaNetHeads: number;   // V heads (value projection heads for the recurrent state)
+      deltaHeadDim: number;       // state matrix inner dim (same for Q and K)
+      // Gated Attention geometry (standard RoPE attention on a subset of layers)
+      // Uses model.numKvHeads and model.headDim for KV cache computation
+      ropeDim: number;            // RoPE embedding dimension
+    }
 
 export type ArchitectureConfig =
   | { type: 'dense' }
