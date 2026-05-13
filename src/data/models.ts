@@ -44,6 +44,64 @@ export const MODELS: ModelArch[] = [
     attention: { type: 'full' },
     architecture: { type: 'dense' }
   },
+  // === Qwen3 MoE ===
+  {
+    id: 'qwen3-30b-a3b', name: 'Qwen3-30B-A3B', family: 'qwen3',
+    layers: 48, hiddenDim: 2048, intermediateDim: 768,
+    numHeads: 32, numKvHeads: 4, headDim: 128, vocabSize: 151936,
+    paramCount: 30_500_000_000,
+    attention: { type: 'full' },
+    architecture: {
+      type: 'moe',
+      numExperts: 128,
+      numExpertsActive: 8,
+      numSharedExperts: 0,
+      activeParamCount: 3_300_000_000
+    }
+  },
+  {
+    id: 'qwen3-235b-a22b', name: 'Qwen3-235B-A22B', family: 'qwen3',
+    layers: 94, hiddenDim: 4096, intermediateDim: 1536,
+    numHeads: 64, numKvHeads: 4, headDim: 128, vocabSize: 151936,
+    paramCount: 235_000_000_000,
+    attention: { type: 'full' },
+    architecture: {
+      type: 'moe',
+      numExperts: 128,
+      numExpertsActive: 8,
+      numSharedExperts: 0,
+      activeParamCount: 22_000_000_000
+    }
+  },
+  // === Qwen3 Coder ===
+  {
+    id: 'qwen3-coder-30b-a3b', name: 'Qwen3-Coder-30B-A3B', family: 'qwen3',
+    layers: 48, hiddenDim: 2048, intermediateDim: 768,
+    numHeads: 32, numKvHeads: 4, headDim: 128, vocabSize: 151936,
+    paramCount: 30_500_000_000,
+    attention: { type: 'full' },
+    architecture: {
+      type: 'moe',
+      numExperts: 128,
+      numExpertsActive: 8,
+      numSharedExperts: 0,
+      activeParamCount: 3_300_000_000
+    }
+  },
+  {
+    id: 'qwen3-coder-480b-a35b', name: 'Qwen3-Coder-480B-A35B', family: 'qwen3',
+    layers: 62, hiddenDim: 6144, intermediateDim: 2560,
+    numHeads: 96, numKvHeads: 8, headDim: 128, vocabSize: 151936,
+    paramCount: 480_000_000_000,
+    attention: { type: 'full' },
+    architecture: {
+      type: 'moe',
+      numExperts: 160,
+      numExpertsActive: 8,
+      numSharedExperts: 0,
+      activeParamCount: 35_000_000_000
+    }
+  },
   // === Llama ===
   {
     id: 'llama-3.3-70b', name: 'Llama 3.3 70B', family: 'llama-3',
