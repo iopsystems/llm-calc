@@ -1,12 +1,7 @@
-import type { AttentionConfig, CalcInput, Dtype, GpuVariant, MemoryResult, ModelArch } from './types'
+import type { CalcInput, Dtype, GpuVariant, MemoryResult, ModelArch } from './types'
 import { bytesOf } from './dtypes'
 
 const BYTES_PER_GB = 1024 ** 3
-
-export function effectiveAttentionLength(rawSeqlen: number, attention: AttentionConfig): number {
-  if (attention.type === 'sliding') return Math.min(rawSeqlen, attention.window)
-  return rawSeqlen
-}
 
 export function activeParams(model: ModelArch): number {
   return model.architecture.type === 'moe'
@@ -14,18 +9,34 @@ export function activeParams(model: ModelArch): number {
     : model.paramCount
 }
 
-export function kvBytesPerToken(model: ModelArch, kvDtype: Dtype): number {
+export function kvBytesPerTokenPerLayer(model: ModelArch, kvDtype: Dtype): number {
   const att = model.attention
   if (att.type === 'mla') {
-    return model.layers * (att.kvLoraRank + att.qkRopeHeadDim) * bytesOf(kvDtype)
+    return (att.kvLoraRank + att.qkRopeHeadDim) * bytesOf(kvDtype)
   }
-  return 2 * model.layers * model.numKvHeads * model.headDim * bytesOf(kvDtype)
+  return 2 * model.numKvHeads * model.headDim * bytesOf(kvDtype)
 }
 
 export function attentionDim(model: ModelArch): number {
   const att = model.attention
   if (att.type === 'mla') return att.kvLoraRank + att.qkRopeHeadDim
   return model.numHeads * model.headDim
+}
+
+export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number): number {
+  const att = model.attention
+  if (att.type === 'hybrid') {
+    if (att.numSlidingLayers + att.numGlobalLayers !== model.layers) {
+      throw new Error(
+        `hybrid layer counts must sum to model.layers: ` +
+        `${att.numSlidingLayers} + ${att.numGlobalLayers} ≠ ${model.layers}`
+      )
+    }
+    return att.numSlidingLayers * Math.min(seqlen, att.slidingWindow)
+         + att.numGlobalLayers * seqlen
+  }
+  const perLayer = att.type === 'sliding' ? Math.min(seqlen, att.window) : seqlen
+  return model.layers * perLayer
 }
 
 function findVariant(input: CalcInput): GpuVariant {
@@ -40,9 +51,9 @@ export function computeMemory(input: CalcInput): MemoryResult {
   const seqlen = workload.promptTokens + workload.outputTokens
 
   const weights = model.paramCount * bytesOf(quant.weights)
-  const kvPerTokenPerRequest = kvBytesPerToken(model, quant.kv)
-  const effSeqlen = effectiveAttentionLength(seqlen, model.attention)
-  const kvCachePerRequest = kvPerTokenPerRequest * effSeqlen
+  const kvPerLayerPerToken = kvBytesPerTokenPerLayer(model, quant.kv)
+  const attendedSeqlen = attendedSeqlenSummedOverLayers(model, seqlen)
+  const kvCachePerRequest = kvPerLayerPerToken * attendedSeqlen
   const kvCacheTotal = kvCachePerRequest * workload.concurrency
 
   // Coarse: one layer's attention + FFN buffer × small constant.
