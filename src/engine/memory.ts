@@ -11,7 +11,7 @@ export function activeParams(model: ModelArch): number {
 
 export function kvBytesPerTokenPerLayer(model: ModelArch, kvDtype: Dtype): number {
   const att = model.attention
-  if (att.type === 'mla') {
+  if (att.type === 'mla' || att.type === 'mla-dsa') {
     return (att.kvLoraRank + att.qkRopeHeadDim) * bytesOf(kvDtype)
   }
   return 2 * model.numKvHeads * model.headDim * bytesOf(kvDtype)
@@ -19,11 +19,12 @@ export function kvBytesPerTokenPerLayer(model: ModelArch, kvDtype: Dtype): numbe
 
 export function attentionDim(model: ModelArch): number {
   const att = model.attention
-  if (att.type === 'mla') return att.kvLoraRank + att.qkRopeHeadDim
+  if (att.type === 'mla' || att.type === 'mla-dsa') return att.kvLoraRank + att.qkRopeHeadDim
   return model.numHeads * model.headDim
 }
 
-export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number): number {
+// forKv=true: KV storage (mla-dsa caches all tokens, topK only limits compute attention).
+export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number, forKv = false): number {
   const att = model.attention
   if (att.type === 'hybrid') {
     if (att.numSlidingLayers + att.numGlobalLayers !== model.layers) {
@@ -35,6 +36,7 @@ export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number)
     return att.numSlidingLayers * Math.min(seqlen, att.slidingWindow)
          + att.numGlobalLayers * seqlen
   }
+  if (att.type === 'mla-dsa') return model.layers * (forKv ? seqlen : Math.min(seqlen, att.topK))
   const perLayer = att.type === 'sliding' ? Math.min(seqlen, att.window) : seqlen
   return model.layers * perLayer
 }
@@ -52,7 +54,7 @@ export function computeMemory(input: CalcInput): MemoryResult {
 
   const weights = model.paramCount * bytesOf(quant.weights)
   const kvPerLayerPerToken = kvBytesPerTokenPerLayer(model, quant.kv)
-  const attendedSeqlen = attendedSeqlenSummedOverLayers(model, seqlen)
+  const attendedSeqlen = attendedSeqlenSummedOverLayers(model, seqlen, true)
   const kvCachePerRequest = kvPerLayerPerToken * attendedSeqlen
   const kvCacheTotal = kvCachePerRequest * workload.concurrency
 
