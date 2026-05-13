@@ -285,6 +285,22 @@ export const MODELS: ModelArch[] = [
       activeParamCount: 12_000_000_000
     }
   },
+  // GLM-4.7-Flash introduces MLA to the GLM MoE line: kv_lora_rank 512,
+  // qk_nope_head_dim 192, qk_rope_head_dim 64, v_head_dim 256.
+  {
+    id: 'glm-4.7-flash', name: 'GLM-4.7-Flash', family: 'glm',
+    layers: 47, hiddenDim: 2048, intermediateDim: 1536,
+    numHeads: 20, numKvHeads: 20, headDim: 256, vocabSize: 154880,
+    paramCount: 30_000_000_000,
+    attention: { type: 'mla', kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 192, vHeadDim: 256 },
+    architecture: {
+      type: 'moe',
+      numExperts: 64,
+      numExpertsActive: 4,
+      numSharedExperts: 1,
+      activeParamCount: 3_000_000_000
+    }
+  },
   {
     id: 'glm-5', name: 'GLM-5', family: 'glm',
     layers: 78, hiddenDim: 6144, intermediateDim: 12288,
