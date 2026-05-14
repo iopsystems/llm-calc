@@ -734,3 +734,72 @@ describe('calculate — multi-GPU integration', () => {
     expect(r.memory.fits).toBe(false)
   })
 })
+
+describe('calculate — disaggregated serving (KV transfer TTFT bump)', () => {
+  const h100 = ACCELERATORS.find(a => a.id === 'h100')!
+  const llama70b = MODELS.find(m => m.id === 'llama-3.3-70b')!
+  const hgxH100 = SYSTEMS.find(s => s.id === 'hgx-h100-8')!
+
+  function input(disaggFabric?: string, firstTokenOnPrefill?: boolean): CalcInput {
+    return {
+      accelerator: h100,
+      acceleratorVariantId: 'sxm-80',
+      model: llama70b,
+      quant: { weights: 'fp16', kv: 'fp16', activations: 'fp16' },
+      workload: { promptTokens: 8192, outputTokens: 512, concurrency: 1 },
+      multiDevice: {
+        system: hgxH100,
+        parallelism: ['tp'],
+        parallelismDegrees: { tp: 8 },
+        ...(disaggFabric && { disaggKvTransferFabricId: disaggFabric }),
+        ...(firstTokenOnPrefill !== undefined && { disaggFirstTokenOnPrefill: firstTokenOnPrefill })
+      }
+    }
+  }
+
+  it('integrated serving (no disaggKvTransferFabricId): ttftS = prefill.timeS', () => {
+    const r = calculate(input())
+    expect(r.perf['peak'].ttftS).toBe(r.perf['peak'].prefill.timeS)
+  })
+
+  it('disagg default (first-token-on-prefill): ttftS = prefill.timeS + decode.timePerTokenS', () => {
+    const r = calculate(input('ib-ndr'))
+    expect(r.perf['peak'].ttftS).toBeCloseTo(
+      r.perf['peak'].prefill.timeS + r.perf['peak'].decode.timePerTokenS, 12
+    )
+  })
+
+  it('disagg sequential (first-token-on-prefill=false): ttftS = prefill + kvCachePerRequest / 50e9', () => {
+    const r = calculate(input('ib-ndr', false))
+    // IB-NDR perDirectionGBs = 50 → 50e9 B/s
+    const transferS = r.memory.kvCachePerRequest / (50 * 1e9)
+    expect(r.perf['peak'].ttftS).toBeCloseTo(r.perf['peak'].prefill.timeS + transferS, 12)
+  })
+
+  it('disagg sequential over slower fabric: TTFT bump scales inversely with fabric BW', () => {
+    const rNdr = calculate(input('ib-ndr', false))
+    const rHdr = calculate(input('ib-hdr', false))
+    // HDR perDirectionGBs = 25, NDR = 50; HDR transfer should be ~2× NDR transfer.
+    const ndrBump = rNdr.perf['peak'].ttftS - rNdr.perf['peak'].prefill.timeS
+    const hdrBump = rHdr.perf['peak'].ttftS - rHdr.perf['peak'].prefill.timeS
+    expect(hdrBump / ndrBump).toBeCloseTo(2, 3)
+  })
+
+  it('disagg default: TTFT independent of fabric speed (transfer hidden behind first decode)', () => {
+    const rNdr = calculate(input('ib-ndr'))
+    const rHdr = calculate(input('ib-hdr'))
+    // Both should equal prefill + 1 decode step regardless of fabric.
+    expect(rNdr.perf['peak'].ttftS).toBe(rHdr.perf['peak'].ttftS)
+  })
+
+  it('disagg does not affect outputTokenRate (decode unchanged)', () => {
+    const rIntegrated = calculate(input())
+    const rDisagg = calculate(input('ib-ndr'))
+    expect(rDisagg.perf['peak'].outputTokenRate).toBe(rIntegrated.perf['peak'].outputTokenRate)
+  })
+
+  it('disagg with unknown fabric id falls through silently (no transfer cost)', () => {
+    const r = calculate(input('does-not-exist'))
+    expect(r.perf['peak'].ttftS).toBe(r.perf['peak'].prefill.timeS)
+  })
+})

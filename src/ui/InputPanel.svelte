@@ -1,9 +1,14 @@
 <script lang="ts">
   import { ACCELERATORS, MODELS } from '../data'
   import { SYSTEMS } from '../data/systems'
-  import { acceleratorId, variantId, systemId, modelId, quant, workload } from './stores'
+  import { INTERCONNECTS } from '../data/interconnects'
+  import { acceleratorId, variantId, systemId, modelId, quant, workload, disaggKvTransferFabricId, disaggFirstTokenOnPrefill } from './stores'
   import type { Dtype } from '../engine/types'
   import ParallelismPicker from './ParallelismPicker.svelte'
+
+  // Disagg fabric options — scale-out fabrics (IB, EFA) are the realistic ones.
+  // Filter to those entries in INTERCONNECTS.
+  const disaggFabrics = INTERCONNECTS.filter(i => i.scale === 'scale-out')
 
   const DTYPES: Dtype[] = ['fp32', 'fp16', 'bf16', 'fp8', 'fp4', 'int8', 'int4']
 
@@ -72,6 +77,23 @@
         </label>
       {/if}
       <ParallelismPicker />
+      {#if $systemId}
+        <label>
+          Disagg KV transfer
+          <select bind:value={$disaggKvTransferFabricId}>
+            <option value="">— integrated —</option>
+            {#each disaggFabrics as f}
+              <option value={f.id}>{f.name}</option>
+            {/each}
+          </select>
+        </label>
+        {#if $disaggKvTransferFabricId}
+          <label class="inline">
+            <input type="checkbox" bind:checked={$disaggFirstTokenOnPrefill} />
+            <span>1st token on prefill (hide transfer in TTFT)</span>
+          </label>
+        {/if}
+      {/if}
     </div>
   </fieldset>
 
@@ -144,5 +166,7 @@
      enough to sit three-across on a typical viewport. */
   .row { display: flex; flex-direction: column; gap: 0.5rem; }
   label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9rem; }
+  label.inline { flex-direction: row; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+  label.inline input[type=checkbox] { width: auto; }
   select, input { font-size: 1rem; padding: 0.25rem; width: 100%; box-sizing: border-box; }
 </style>

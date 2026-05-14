@@ -375,6 +375,16 @@ export interface MultiDeviceConfig {
   system: MultiAcceleratorSystem
   parallelism: ParallelismMode['id'][]
   parallelismDegrees: Partial<Record<ParallelismMode['id'], number>>
+  // Disaggregated serving: prefill cluster ships KV cache to decode cluster
+  // over this fabric. References InterconnectSpec.id. Undefined = integrated
+  // serving (prefill and decode on the same hardware, no transfer cost).
+  disaggKvTransferFabricId?: string
+  // When disagg is active, whether the prefill node emits the first decoded
+  // token locally while KV transfer streams in parallel. Production-standard
+  // optimization (DeepSeek PD, NVIDIA Dynamo, vLLM disagg, Mooncake). Default
+  // true. Setting false models the worst-case sequential handoff for
+  // comparison.
+  disaggFirstTokenOnPrefill?: boolean
 }
 
 export interface CalcInput {
