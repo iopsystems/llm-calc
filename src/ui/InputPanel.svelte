@@ -5,6 +5,7 @@
   import { acceleratorId, variantId, systemId, modelId, quant, workload, disaggKvTransferFabricId, disaggFirstTokenOnPrefill } from './stores'
   import type { Dtype } from '../engine/types'
   import ParallelismPicker from './ParallelismPicker.svelte'
+  import { parseTokenCount, formatTokenCount } from './parseTokens'
 
   // Disagg fabric options — scale-out fabrics (IB, EFA) are the realistic ones.
   // Filter to those entries in INTERCONNECTS.
@@ -44,6 +45,39 @@
   $: if (accelerator && !variants.find(v => v.id === $variantId)) {
        variantId.set(variants[0]?.id ?? '')
      }
+
+  // Soft warning when promptTokens exceeds the model's trained context window.
+  // Calc still runs and extrapolates linearly; the badge surfaces the caveat.
+  $: selectedModel = MODELS.find(m => m.id === $modelId)
+  $: contextWarning = selectedModel && $workload.promptTokens > selectedModel.maxContext
+    ? `> trained ceiling ${formatTokenCount(selectedModel.maxContext)}`
+    : null
+
+  // Local string state for unit-aware token inputs ("40k", "1M", etc.).
+  // Push to the store only on a successful parse, so a partially-typed or
+  // invalid value never propagates NaN downstream and blanks the chart.
+  let promptInput = formatTokenCount($workload.promptTokens)
+  let outputInput = formatTokenCount($workload.outputTokens)
+  let promptInvalid = false
+  let outputInvalid = false
+
+  function onPromptInput(e: Event) {
+    const v = (e.target as HTMLInputElement).value
+    promptInput = v
+    const n = parseTokenCount(v)
+    if (n === null) { promptInvalid = true; return }
+    promptInvalid = false
+    workload.update(w => ({ ...w, promptTokens: n }))
+  }
+
+  function onOutputInput(e: Event) {
+    const v = (e.target as HTMLInputElement).value
+    outputInput = v
+    const n = parseTokenCount(v)
+    if (n === null) { outputInvalid = true; return }
+    outputInvalid = false
+    workload.update(w => ({ ...w, outputTokens: n }))
+  }
 </script>
 
 <section class="input-panel">
@@ -134,11 +168,35 @@
     <div class="row">
       <label>
         Prompt tokens
-        <input type="number" min="1" bind:value={$workload.promptTokens} />
+        <input
+          type="text"
+          inputmode="numeric"
+          value={promptInput}
+          on:input={onPromptInput}
+          class:invalid={promptInvalid}
+          title="Accepts plain integers or k/M suffixes (1024-based), e.g. 40k, 1M"
+        />
+        {#if promptInvalid}
+          <span class="warn">⚠ invalid — use e.g. 8192, 40k, 1M</span>
+        {:else if contextWarning}
+          <span class="warn" title="Model trained at max_position_embeddings={selectedModel?.maxContext}. The calc still runs but accuracy is extrapolated past this ceiling.">
+            ⚠ {contextWarning}
+          </span>
+        {/if}
       </label>
       <label>
         Output tokens
-        <input type="number" min="1" bind:value={$workload.outputTokens} />
+        <input
+          type="text"
+          inputmode="numeric"
+          value={outputInput}
+          on:input={onOutputInput}
+          class:invalid={outputInvalid}
+          title="Accepts plain integers or k/M suffixes (1024-based)"
+        />
+        {#if outputInvalid}
+          <span class="warn">⚠ invalid — use e.g. 512, 4k</span>
+        {/if}
       </label>
       <label>
         Concurrency
@@ -168,5 +226,7 @@
   label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9rem; }
   label.inline { flex-direction: row; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
   label.inline input[type=checkbox] { width: auto; }
+  .warn { font-size: 0.78rem; color: #b85b00; margin-top: 0.15rem; }
   select, input { font-size: 1rem; padding: 0.25rem; width: 100%; box-sizing: border-box; }
+  input.invalid { border-color: #b85b00; background: #fff7ec; }
 </style>
