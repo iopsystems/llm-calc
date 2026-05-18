@@ -331,7 +331,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
   // TFLOPS figures are best-effort estimates of GPU shader-core throughput (no tensor
   // cores). Cross-check before relying on absolute decode rates.
   {
-    id: 'm3-pro', name: 'Apple M3 Pro', vendor: 'Apple', family: 'Apple Silicon',
+    id: 'm3-pro', name: 'Apple M3 Pro', vendor: 'Apple', family: 'M3',
     releaseDate: '2023-10',
     variants: [
       { id: '18gb', label: '18GB', hbmCapacityGB: 18,
@@ -343,7 +343,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     ]
   },
   {
-    id: 'm3-ultra', name: 'Apple M3 Ultra', vendor: 'Apple', family: 'Apple Silicon',
+    id: 'm3-ultra', name: 'Apple M3 Ultra', vendor: 'Apple', family: 'M3',
     releaseDate: '2025-03',
     variants: [
       { id: '96gb', label: '96GB', hbmCapacityGB: 96,
@@ -358,7 +358,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     ]
   },
   {
-    id: 'm4-pro', name: 'Apple M4 Pro', vendor: 'Apple', family: 'Apple Silicon',
+    id: 'm4-pro', name: 'Apple M4 Pro', vendor: 'Apple', family: 'M4',
     releaseDate: '2024-10',
     variants: [
       { id: '24gb', label: '24GB', hbmCapacityGB: 24,
@@ -370,7 +370,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     ]
   },
   {
-    id: 'm4-max', name: 'Apple M4 Max', vendor: 'Apple', family: 'Apple Silicon',
+    id: 'm4-max', name: 'Apple M4 Max', vendor: 'Apple', family: 'M4',
     releaseDate: '2024-10',
     variants: [
       { id: '36gb', label: '36GB', hbmCapacityGB: 36,
@@ -385,7 +385,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     ]
   },
   {
-    id: 'm5-pro', name: 'Apple M5 Pro', vendor: 'Apple', family: 'Apple Silicon',
+    id: 'm5-pro', name: 'Apple M5 Pro', vendor: 'Apple', family: 'M5',
     releaseDate: '2026-01',
     variants: [
       { id: '24gb', label: '24GB', hbmCapacityGB: 24,
@@ -397,7 +397,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     ]
   },
   {
-    id: 'm5-max', name: 'Apple M5 Max', vendor: 'Apple', family: 'Apple Silicon',
+    id: 'm5-max', name: 'Apple M5 Max', vendor: 'Apple', family: 'M5',
     releaseDate: '2026-01',
     variants: [
       { id: '64gb', label: '64GB', hbmCapacityGB: 64,
@@ -447,7 +447,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
   // chip just runs FP8 at BF16 rate. v6e (Trillium) doesn't list FP8 at all;
   // INT8 doubles BF16, indicating a true INT8 datapath.
   {
-    id: 'tpu-v5p', name: 'Google TPU v5p', vendor: 'Google', family: 'TPU',
+    id: 'tpu-v5p', name: 'Google TPU v5p', vendor: 'Google', family: 'TPU v5',
     releaseDate: '2023-12',
     variants: [{
       id: 'chip', label: 'per chip 95GB', hbmCapacityGB: 95,
@@ -459,7 +459,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     }]
   },
   {
-    id: 'tpu-trillium', name: 'Google TPU v6e (Trillium)', vendor: 'Google', family: 'TPU',
+    id: 'tpu-trillium', name: 'Google TPU v6e (Trillium)', vendor: 'Google', family: 'TPU v6',
     releaseDate: '2024-12',
     variants: [{
       id: 'chip', label: 'per chip 32GB', hbmCapacityGB: 32,
@@ -477,7 +477,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
   // disclosed in AWS marketing — FP8 numbers here are taken at face value as
   // "peak" without sparsity, but treat with care.
   {
-    id: 'trainium-2', name: 'AWS Trainium2', vendor: 'AWS', family: 'Neuron',
+    id: 'trainium-2', name: 'AWS Trainium2', vendor: 'AWS', family: 'NeuronCore-v3',
     releaseDate: '2024-12',
     // Per-chip derived from Trn2.48xlarge aggregates: 16 chips, 1.5 TB HBM3,
     // 46 TB/s aggregate bandwidth, 20.8 PFLOPS FP8 (no sparsity qualifier
@@ -494,7 +494,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     }]
   },
   {
-    id: 'inferentia-2', name: 'AWS Inferentia2', vendor: 'AWS', family: 'Neuron',
+    id: 'inferentia-2', name: 'AWS Inferentia2', vendor: 'AWS', family: 'NeuronCore-v2',
     releaseDate: '2023-04',
     // Per chip: 32 GB HBM (explicit on AWS Inf2 page); 9.8 TB/s aggregate ÷ 12
     // chips = ~817 GB/s per chip; 190 TFLOPS FP16 explicit on the AWS Neuron/
@@ -520,7 +520,7 @@ export const ACCELERATORS: AcceleratorSpec[] = [
   // headline "AI compute" number with precision and sparsity unspecified in
   // the datasheet — treat the FP16/BF16 entries as a rough upper bound.
   {
-    id: 'cerebras-wse3', name: 'Cerebras WSE-3', vendor: 'Cerebras', family: 'Wafer-Scale',
+    id: 'cerebras-wse3', name: 'Cerebras WSE-3', vendor: 'Cerebras', family: 'WSE-3',
     releaseDate: '2024-03',
     variants: [{
       id: 'cs3', label: 'CS-3', hbmCapacityGB: 44,
