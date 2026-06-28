@@ -6,5 +6,9 @@ dist
 .wrangler
 .dev.vars
 
-# Claude Code session runtime (lockfiles etc.)
-.claude/
+# Claude Code: ignore session runtime, but track the committed tooling
+# (skills, hooks, settings) the repo + its CI depend on.
+.claude/*
+!.claude/skills/
+!.claude/hooks/
+!.claude/settings.json

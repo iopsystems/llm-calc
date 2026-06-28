@@ -9,10 +9,10 @@ import {
   extractSkillArchitectureVariants,
   extractSkillModelArchFields,
   // @ts-expect-error — plain .mjs, no .d.ts
-} from '../../.claude/hooks/check-skill-sync.mjs'
+} from '../.claude/hooks/check-skill-sync.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = resolve(__dirname, '../..')
+const REPO_ROOT = resolve(__dirname, '..')
 
 describe('extractDiscriminants', () => {
   it('parses a TS union of { type: "X" } literals', () => {
@@ -86,7 +86,7 @@ Otherwise: \`architecture: { type: 'dense' }\`.
 })
 
 describe('integration: current files are in sync', () => {
-  const typesSrc = readFileSync(resolve(REPO_ROOT, 'calc/src/engine/types.ts'), 'utf8')
+  const typesSrc = readFileSync(resolve(REPO_ROOT, 'src/engine/types.ts'), 'utf8')
   const skillMd = readFileSync(
     resolve(REPO_ROOT, '.claude/skills/adding-a-model/SKILL.md'), 'utf8'
   )
