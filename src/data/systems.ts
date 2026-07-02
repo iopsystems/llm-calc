@@ -145,6 +145,48 @@ export const SYSTEMS: MultiAcceleratorSystem[] = [
     },
     notes: 'MI325X refresh of the 8-OAM platform — same xGMI mesh, larger 256GB HBM3e per GPU. Limited cloud availability as of mid-2026; mostly OEM channel.'
   },
+  {
+    id: 'mi350x-8',
+    releaseDate: '2025-06',
+    name: 'AMD MI350X 8-OAM platform',
+    vendor: 'AMD',
+    generation: 'CDNA4',
+    formFactor: 'baseboard',
+    accelerator: { id: 'mi350x', variantId: 'oam-288', count: 8 },
+    interconnectId: 'xgmi-mi350',
+    scaleOutInterconnectId: 'roce-400',
+    scaleOutNicsPerNode: 8,  // one dedicated 400G NIC per GPU (Supermicro H14 datasheet)
+    aggregate: {
+      totalHbmGB: 2304,
+      fabricBidirectionalTBs: 8.6016
+    },
+    availability: {
+      onPrem: true,
+      clouds: ['digitalocean']
+    },
+    notes: 'Air-cooled 8× MI350X on UBB 2.0, fully-connected IF mesh. Supermicro AS-8126GS-TNMR (8U) is a typical OEM host. MI350 series is Ethernet-first for scale-out (Pensando Pollara 400 / 400G RoCE per GPU). DigitalOcean GPU Droplets (ATL1) as of 2026-07.'
+  },
+  {
+    id: 'mi355x-8',
+    releaseDate: '2025-06',
+    name: 'AMD MI355X 8-OAM platform',
+    vendor: 'AMD',
+    generation: 'CDNA4',
+    formFactor: 'baseboard',
+    accelerator: { id: 'mi355x', variantId: 'oam-288', count: 8 },
+    interconnectId: 'xgmi-mi350',
+    scaleOutInterconnectId: 'roce-400',
+    scaleOutNicsPerNode: 8,  // one dedicated 400G NIC per GPU (Supermicro H14 datasheet)
+    aggregate: {
+      totalHbmGB: 2304,
+      fabricBidirectionalTBs: 8.6016
+    },
+    availability: {
+      onPrem: true,
+      clouds: ['oci', 'crusoe', 'vultr', 'tensorwave']
+    },
+    notes: 'Liquid-cooled (1400W) 8× MI355X on UBB 2.0 — same IF mesh as MI350X, higher clocks. Supermicro AS-4126GS-NMR-LCC (4U D2C) is a typical OEM host. OCI BM.GPU.MI355X.8 (GA 2025-10), Crusoe, Vultr 8-GPU plans, TensorWave (first deployments 2025-06).'
+  },
 
   // === Intel ===
   {

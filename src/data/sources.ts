@@ -52,6 +52,14 @@ export const SOURCES = {
     title: 'AMD CDNA 3 Architecture White Paper',
     url: 'https://www.amd.com/system/files/documents/amd-cdna-3-white-paper.pdf'
   },
+  'amd-mi350x-datasheet': {
+    title: 'AMD Instinct MI350X GPU Datasheet',
+    url: 'https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/product-briefs/amd-instinct-mi350x-gpu-brochure.pdf'
+  },
+  'amd-mi355x-datasheet': {
+    title: 'AMD Instinct MI355X GPU Datasheet',
+    url: 'https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/product-briefs/amd-instinct-mi355x-gpu-brochure.pdf'
+  },
   'google-tpu-v5p-docs': {
     title: 'Google Cloud — TPU v5p system architecture',
     url: 'https://cloud.google.com/tpu/docs/v5p'
