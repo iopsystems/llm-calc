@@ -3,6 +3,7 @@
   import { input, result, multiDevice } from './stores'
   import { INTERCONNECTS } from '../data/interconnects'
   import { PLOT_STYLE } from './plotDefaults'
+  import { commsCeilings, type CommsCeiling } from './rooflineComms'
 
   let container: HTMLDivElement | undefined = $state(undefined)
 
@@ -10,10 +11,20 @@
   // own roofline AND markers, sharing one color via the tier scale.
   // Single-device, markers sit on their tier's roof by construction — time =
   // max(F/C, B/M), so achieved rate is min(C, AI×M), i.e. exactly the roof.
-  // Multi-device adds a third term (comms): a comms-bound marker plots BELOW
-  // the roof, and not on the purple interconnect line either — that line is
-  // drawn in HBM-AI space (x = flops ÷ HBM bytes) while comms time divides by
-  // comms bytes, a different denominator.
+  // Multi-device adds a third term (comms), with its own ceiling per phase:
+  // comms time divides by comms bytes, not HBM bytes, so the fabric line must
+  // be rescaled by each phase's comms/HBM byte ratio to live in HBM-AI space
+  // (see rooflineComms.ts). A comms-bound marker sits exactly on its phase's
+  // ceiling, the same way memory-/compute-bound markers sit on the roof.
+
+  // Per-phase comms ceiling strokes. Fuchsia vs blue-violet: validated
+  // (dataviz six-checks) against each other and the tier strokes (#888,
+  // #21a87a) on the light surface; phase identity is also carried by the
+  // on-chart line labels and the marker symbols, not color alone.
+  const COMMS_COLORS: Record<'prefill' | 'decode', string> = {
+    prefill: '#cc4bbf',
+    decode: '#6a5acd'
+  }
   type RoofRow = {
     tier: 'Theoretical' | 'Achievable'
     ai: number
@@ -135,13 +146,24 @@
 
   const hasAchievable = $derived(data.points.some(p => p.tier === 'Achievable'))
 
-  // Interconnect ceiling — only when a multi-device system is active.
-  const interconnectBwGBs = $derived.by(() => {
-    if (!$multiDevice) return null
+  // Per-phase interconnect ceilings — only when a multi-device system is
+  // active and the phase actually moves collective traffic. FLOPs/bytes/comms
+  // volumes are op-point-independent (only rates differ per tier), so any
+  // perf tier supplies the same ceilings.
+  const ceilings: CommsCeiling[] = $derived.by(() => {
+    if (!$multiDevice || !$result) return []
     const ic = INTERCONNECTS.find(i => i.id === $multiDevice!.system.interconnectId)
-    if (!ic) return null
+    if (!ic) return []
     // Use explicit perDirectionGBs if set; fall back to half of bidirectional.
-    return ic.perDirectionGBs ?? ic.perGpuBandwidthGBs / 2
+    const bwBs = (ic.perDirectionGBs ?? ic.perGpuBandwidthGBs / 2) * 1e9
+    const p = Object.values($result.perf)[0]
+    if (!p) return []
+    return commsCeilings([
+      { phase: 'prefill', flops: p.prefill.flops, hbmBytes: p.prefill.bytes,
+        commsBytes: p.prefill.commsBytes },
+      { phase: 'decode', flops: p.decode.flopsPerStep, hbmBytes: p.decode.bytesPerStep,
+        commsBytes: p.decode.commsBytes }
+    ], bwBs)
   })
 
   const chart = $derived.by(() => {
@@ -209,16 +231,42 @@
           x: 'ai', y: 'perf', stroke: '#bbb', strokeWidth: 1,
           strokeDasharray: '2 3', z: 'phase', clip: true
         }),
-        // Interconnect bandwidth ceiling (dashed purple) — lower slope than HBM,
-        // represents the comms bottleneck when collective traffic saturates the fabric.
-        ...(interconnectBwGBs ? [
-          Plot.line(
-            [{ x: data.xMin, y: data.xMin * interconnectBwGBs * 1e9 },
-             { x: data.xMax, y: data.xMax * interconnectBwGBs * 1e9 }],
-            { x: 'x', y: 'y', stroke: '#9b59b6', strokeWidth: 1.5,
-              strokeDasharray: '4,2', clip: true }
-          )
-        ] : []),
+        // Per-phase interconnect ceilings (dashed): fabric bandwidth rescaled
+        // by each phase's comms/HBM byte ratio so the line lives in the same
+        // AI space as the markers — a comms-bound marker sits ON its line.
+        ...ceilings.flatMap(c => {
+          const stroke = COMMS_COLORS[c.phase]
+          const marks = [
+            Plot.line(
+              [{ x: data.xMin, y: data.xMin * c.slopeBytesPerS },
+               { x: data.xMax, y: data.xMax * c.slopeBytesPerS }],
+              { x: 'x', y: 'y', stroke, strokeWidth: 1.5,
+                strokeDasharray: '4,2', clip: true }
+            )
+          ]
+          // Label at the log-midpoint of the segment visible inside the
+          // domain (the ceiling can enter/exit through any edge). Skipped
+          // when the line misses the viewport entirely.
+          const xLow = Math.max(data.xMin, data.yMin / c.slopeBytesPerS)
+          const xHigh = Math.min(data.xMax, data.yMax / c.slopeBytesPerS)
+          if (xLow < xHigh) {
+            const xMid = Math.sqrt(xLow * xHigh)
+            const yMid = xMid * c.slopeBytesPerS
+            // Anchor/offset flip near the frame edges so a ceiling that only
+            // clips a corner (e.g. decode with tiny comms volume) doesn't get
+            // its label cropped by the plot frame.
+            const fx = Math.log(xMid / data.xMin) / Math.log(data.xMax / data.xMin)
+            const fy = Math.log(yMid / data.yMin) / Math.log(data.yMax / data.yMin)
+            marks.push(Plot.text([{ x: xMid, y: yMid, text: c.label }], {
+              x: 'x', y: 'y', text: 'text',
+              fill: stroke, stroke: 'white', strokeWidth: 4,
+              dy: fy > 0.9 ? 12 : -9,
+              textAnchor: fx < 0.2 ? 'start' : fx > 0.8 ? 'end' : 'middle',
+              clip: true
+            }))
+          }
+          return marks
+        }),
         // Single dot mark = single interactive tip. Splitting note/no-note
         // points into two `tip`-bearing marks installs two competing pointer
         // handlers that re-render each other's tip layer on every pointermove —
@@ -266,12 +314,12 @@
     <h3>Roofline</h3>
     <p class="caption">
       Roof = theoretical ceiling at peak {$input?.quant.activations} (sloped = memory-bound,
-      flat = compute-bound{#if interconnectBwGBs}, dashed purple = interconnect-bound{/if}).
+      flat = compute-bound).
       Markers are the workload's prefill and decode; the gap between the achievable marker
       and the roof above it is the hardware-efficiency loss.
-      {#if interconnectBwGBs}Comms-bound markers sit below the roof: the on-chip
-      ceilings don't include collective traffic (check the marker tooltip's
-      Bottleneck row).{/if}
+      {#if ceilings.length > 0}Dashed lines are per-phase interconnect ceilings —
+      fabric bandwidth ÷ that phase's comms-to-HBM-bytes ratio (shown in the line
+      label) — so a comms-bound marker sits on its phase's line.{/if}
     </p>
     <div class="chart-row">
     <div bind:this={container} class="plot"></div>
@@ -291,14 +339,14 @@
             <span>Achievable</span>
           </span>
         {/if}
-        {#if interconnectBwGBs}
+        {#each ceilings as c (c.phase)}
           <span class="entry">
             <svg class="line-swatch" viewBox="0 0 22 10" aria-hidden="true">
-              <line x1="1" y1="5" x2="21" y2="5" stroke="#9b59b6" stroke-width="2" stroke-dasharray="4 2"/>
+              <line x1="1" y1="5" x2="21" y2="5" stroke={COMMS_COLORS[c.phase]} stroke-width="2" stroke-dasharray="4 2"/>
             </svg>
-            <span>Interconnect BW</span>
+            <span>{c.phase} comms ceiling</span>
           </span>
-        {/if}
+        {/each}
       </div>
       <div class="legend-group">
         <span class="entry">
