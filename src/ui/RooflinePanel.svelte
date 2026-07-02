@@ -288,6 +288,13 @@
             Note: { value: (d: { note?: string }) => d.note ?? null, label: 'Note' }
           },
           tip: {
+            // The tip box extends up to ~226px from its anchor marker; the
+            // default pointer maxRadius (40px) unfocuses the marker as soon
+            // as the cursor drifts into the box to read it, so the tooltip
+            // vanishes mid-read and flickers on re-approach. 260 keeps the
+            // whole box (plus margin) inside the focus radius; markers sit
+            // hundreds of px apart, so nearest-marker selection is unaffected.
+            maxRadius: 260,
             format: {
               x: false, y: false,
               stroke: false, fill: false,
