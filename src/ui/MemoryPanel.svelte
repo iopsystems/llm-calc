@@ -49,9 +49,9 @@
     // When perRank is present, show per-GPU segments against per-GPU HBM cap.
     const pr = m.perRank
     const raw: { component: Component; bytes: number }[] = [
-      { component: 'Weights',     bytes: pr ? pr.weights           : m.weights },
-      { component: 'KV cache',    bytes: pr ? pr.kvCachePerRequest : m.kvCacheTotal },
-      { component: 'Activations', bytes: pr ? pr.activationsPeak   : m.activationsPeak }
+      { component: 'Weights',     bytes: pr ? pr.weights         : m.weights },
+      { component: 'KV cache',    bytes: pr ? pr.kvCacheTotal    : m.kvCacheTotal },
+      { component: 'Activations', bytes: pr ? pr.activationsPeak : m.activationsPeak }
     ]
     let cum = 0
     const parts = raw.map(p => {
@@ -128,7 +128,7 @@
     {#if pr && $multiDevice}
       <div class="cluster-total">
         {$multiDevice.system.accelerator.count} × {(pr.total / 1e9).toFixed(1)} GB per GPU
-        = {(m.total / 1e9).toFixed(0)} GB cluster total
+        = {(pr.total * $multiDevice.system.accelerator.count / 1e9).toFixed(0)} GB cluster total
       </div>
     {/if}
     <table>
@@ -149,9 +149,9 @@
               <defs>{@html patternDefsSvg()}</defs>
               <rect width="14" height="10" fill={FILL['KV cache']}/>
             </svg>
-            KV cache {pr ? '(per request)' : '(total)'}
+            KV cache (total)
           </td>
-          <td>{gb(pr ? pr.kvCachePerRequest : m.kvCacheTotal)} GB</td>
+          <td>{gb(pr ? pr.kvCacheTotal : m.kvCacheTotal)} GB</td>
         </tr>
         <tr>
           <td>

@@ -110,6 +110,20 @@ export const INTERCONNECTS: InterconnectSpec[] = [
     sources: ['amd-cdna3-whitepaper'],
     notes: 'MI300X / MI325X OAM platform: 7 xGMI links per GPU in a fully-connected 8-GPU mesh (no switch). 896 GB/s is the bidirectional aggregate widely cited by AMD; per-link figures derived. MI325X is silicon-equivalent to MI300X for IF purposes — not separately verified.'
   },
+  {
+    id: 'xgmi-mi350',
+    name: 'Infinity Fabric (MI350 series)',
+    vendor: 'AMD',
+    generation: 'CDNA4',
+    perGpuBandwidthGBs: 1075.2,
+    linksPerGpu: 7,
+    perLinkGBs: 76.8,
+    topology: 'point-to-point',
+    scale: 'intra-node',
+    maxScaleUpGpus: 8,
+    sources: ['amd-mi350x-datasheet', 'amd-mi355x-datasheet'],
+    notes: 'MI350X / MI355X UBB 2.0 platform: 7 Infinity Fabric links per GPU in a fully-connected 8-GPU mesh (no switch). AMD datasheet spec table: 7× 153.6 GB/s bidirectional per link = 1075.2 GB/s aggregate; AMD prose and OEM materials round this to "160 GB/s between each GPU" / 1120 GB/s aggregate — the spec-table figure is recorded here. Per-link per-direction derived (÷2).'
+  },
 
   // === Google TPU ICI ===
   {

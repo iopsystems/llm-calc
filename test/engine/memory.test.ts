@@ -213,4 +213,28 @@ describe('computeMemory', () => {
     expect(m.kvCachePerRequest).toBe(138)
     expect(m.kvCacheTotal).toBe(276)
   })
+
+  describe('perRank', () => {
+    // buildSide only reads parallelism fields off multiDevice; system is unused.
+    const md = (degrees: Record<string, number>) => ({
+      system: {} as never,
+      parallelism: Object.keys(degrees) as ('tp' | 'pp' | 'ep' | 'dp')[],
+      parallelismDegrees: degrees
+    })
+
+    it('exposes kvCacheTotal = per-rank kv per request × per-replica concurrency', () => {
+      // numKvHeads=1 caps the KV shard at 1 under TP=2, so per-rank KV total
+      // stays the full 240 × 2 = 480 while weights and activations halve.
+      const m = computeMemory({ ...testInput, multiDevice: md({ tp: 2 }) })
+      expect(m.perRank!.kvCacheTotal).toBe(480)
+      expect(m.perRank!.weights).toBe(1000)
+      expect(m.perRank!.activationsPeak).toBe(480)
+    })
+
+    it('per-rank components sum to the per-rank total (what the memory bar stacks)', () => {
+      const m = computeMemory({ ...testInput, multiDevice: md({ tp: 2 }) })
+      const pr = m.perRank!
+      expect(pr.weights + pr.kvCacheTotal + pr.activationsPeak).toBe(pr.total)
+    })
+  })
 })

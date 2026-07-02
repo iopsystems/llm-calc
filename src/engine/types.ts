@@ -212,6 +212,10 @@ export type CloudProvider =
   // pricing/instances page as of 2026-06-15.
   | 'together'   // Together AI — gpu-clusters page lists HGX H100/H200/B200, GB200 NVL72
   | 'nebius'     // Nebius AI Cloud — prices page lists HGX H100/H200/B200, GB200 NVL72
+  // Verified as of 2026-07-02:
+  | 'vultr'        // Vultr — MI355X product page lists 8-GPU cloud plans + bare metal
+  | 'tensorwave'   // TensorWave — AMD-only cloud; MI300X/MI325X/MI355X per site + 2025-06 MI355X launch PR
+  | 'digitalocean' // DigitalOcean — GPU Droplets blog announces MI350X (ATL1); also lists MI300X/MI325X
 
 export interface MultiAcceleratorSystem {
   id: string
@@ -485,6 +489,7 @@ export interface MemorySide {
   perRank?: {
     weights: number
     kvCachePerRequest: number
+    kvCacheTotal: number       // per-rank KV across per-replica concurrency
     activations: number
     total: number
     headroom: number
@@ -508,6 +513,7 @@ export interface MemoryResult {
   perRank?: {
     weights: number
     kvCachePerRequest: number
+    kvCacheTotal: number       // per-rank KV across per-replica concurrency
     activationsPeak: number
     total: number
     headroom: number

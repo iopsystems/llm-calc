@@ -23,7 +23,13 @@ export function perRankMemoryDivisors(
   const weightsDivisor = tp * pp * (model.architecture.type === 'moe' && ep > 1 ? ep : 1)
 
   // KV cache: TP shards heads (capped at numKvHeads), PP per-stage, EP/DP replicated.
-  const kvShard = Math.min(tp, model.numKvHeads)
+  // MLA-family exception: the cache is one shared compressed latent per token
+  // (kv_lora_rank + rope dims), not per-head slices — every TP rank needs the
+  // full latent, which is why MLA deployments serve attention data-parallel.
+  // PP still divides (each stage caches only its own layers' latents).
+  const att = model.attention.type
+  const mlaKv = att === 'mla' || att === 'mla-dsa' || att === 'linear-mla-hybrid'
+  const kvShard = mlaKv ? 1 : Math.min(tp, model.numKvHeads)
   const kvDivisor = kvShard * pp
 
   // Activations: TP shards them; PP/EP/DP don't (per-stage forward, replicated).

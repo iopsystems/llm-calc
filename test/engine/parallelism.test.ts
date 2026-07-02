@@ -23,6 +23,26 @@ const moe: ModelArch = {
   }
 }
 
+// MLA-family models: the KV cache is one shared compressed latent per token
+// (kv_lora_rank + rope dims), not per-head slices — TP cannot shard it.
+const mla: ModelArch = {
+  ...dense,
+  attention: { type: 'mla', kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 128, vHeadDim: 128 }
+}
+const mlaDsa: ModelArch = {
+  ...dense,
+  attention: { type: 'mla-dsa', kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 128, vHeadDim: 128, topK: 2048 }
+}
+const linearMla: ModelArch = {
+  ...dense,
+  attention: {
+    type: 'linear-mla-hybrid',
+    kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 128, vHeadDim: 128,
+    numLinearLayers: 24, numFullLayers: 8,
+    numLinearHeads: 32, linearHeadDim: 128
+  }
+}
+
 describe('perRankMemoryDivisors', () => {
   it('no parallelism: all divisors = 1', () => {
     const d = perRankMemoryDivisors([], {}, dense)
@@ -45,6 +65,21 @@ describe('perRankMemoryDivisors', () => {
     expect(d.weights).toBe(16)
     expect(d.kv).toBe(8)
     expect(d.activations).toBe(16)
+  })
+
+  it('TP=8 MLA: kv replicated (divisor 1) — the latent is shared, not per-head', () => {
+    for (const model of [mla, mlaDsa, linearMla]) {
+      const d = perRankMemoryDivisors(['tp'], { tp: 8 }, model)
+      expect(d.kv).toBe(1)
+      expect(d.weights).toBe(8)   // weight matrices still TP-shard normally
+      expect(d.activations).toBe(8)
+    }
+  })
+
+  it('TP=8 × PP=2 MLA: kv divisor = pp only (each stage caches its own layers)', () => {
+    const d = perRankMemoryDivisors(['tp', 'pp'], { tp: 8, pp: 2 }, mla)
+    expect(d.kv).toBe(2)
+    expect(d.weights).toBe(16)
   })
 
   it('DP=2: weights replicated (divisor 1), replicas=2', () => {

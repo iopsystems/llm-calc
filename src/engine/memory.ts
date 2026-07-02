@@ -225,6 +225,7 @@ export function computeMemory(input: CalcInput): MemoryResult {
       perRank: {
         weights: prefillSide.perRank.weights,
         kvCachePerRequest: prefillSide.perRank.kvCachePerRequest,
+        kvCacheTotal: prefillSide.perRank.kvCacheTotal,
         activationsPeak: prefillSide.perRank.activations,
         total: prefillSide.perRank.total,
         headroom: prefillSide.perRank.headroom,
@@ -266,6 +267,7 @@ function buildSide(
     perRank = {
       weights: rankWeights,
       kvCachePerRequest: rankKvPerRequest,
+      kvCacheTotal: rankKvTotal,
       activations: rankActivations,
       total: rankTotal,
       headroom: rankHeadroom,

@@ -395,6 +395,48 @@ export const ACCELERATORS: AcceleratorSpec[] = [
       }]
     }]
   },
+  {
+    id: 'mi350x', name: 'AMD Instinct MI350X', vendor: 'AMD', family: 'CDNA4',
+    releaseDate: '2025-06', tier: 'datacenter',
+    // 4th Gen CDNA (3nm), the air-cooled member of the MI350 series — same
+    // silicon and memory as MI355X, lower power/clocks (2.2 vs 2.4 GHz).
+    // Per AMD's MI350X GPU datasheet, which quotes dense matrix values
+    // directly (sparsity broken out separately): FP16/BF16 2.3096 PF,
+    // FP8/INT8 4.614 PF, MXFP4 9.2275 PF. MXFP6 (also 9.2275 PF) omitted —
+    // the engine has no fp6 dtype. No verified achievable-FLOPS source yet:
+    // AMD's MAFs blog covers only MI300X/MI325X as of 2026-07.
+    variants: [{
+      id: 'oam-288', label: 'OAM 288GB', hbmCapacityGB: 288,
+      // 1000W max TBP per AMD MI350X GPU datasheet.
+      powerCapW: 1000,
+      operatingPoints: [{
+        id: 'peak', label: 'Peak',
+        tflops: { fp16: 2310, bf16: 2310, fp8: 4614, int8: 4614, fp4: 9228 },
+        hbmBandwidthGBs: 8000
+      }]
+    }]
+  },
+  {
+    id: 'mi355x', name: 'AMD Instinct MI355X', vendor: 'AMD', family: 'CDNA4',
+    releaseDate: '2025-06', tier: 'datacenter',
+    // 4th Gen CDNA (3nm), the liquid-cooling-oriented high-density member of
+    // the MI350 series. Per AMD's MI355X GPU datasheet, which quotes dense
+    // matrix values directly (sparsity broken out separately): FP16/BF16
+    // 2.5166 PF, FP8/INT8 5.0332 PF, MXFP4 10.0663 PF. MXFP6 (also 10.0663 PF)
+    // omitted — the engine has no fp6 dtype. No verified achievable-FLOPS
+    // source yet: AMD's MAFs blog covers only MI300X/MI325X as of 2026-07.
+    variants: [{
+      id: 'oam-288', label: 'OAM 288GB', hbmCapacityGB: 288,
+      // 1400W max TBP per AMD MI355X GPU datasheet (the air-cooled MI350X
+      // sibling runs the same silicon at 1000W with lower peak clocks).
+      powerCapW: 1400,
+      operatingPoints: [{
+        id: 'peak', label: 'Peak',
+        tflops: { fp16: 2517, bf16: 2517, fp8: 5033, int8: 5033, fp4: 10066 },
+        hbmBandwidthGBs: 8000
+      }]
+    }]
+  },
 
   // === AMD Radeon (consumer RX + workstation PRO) ===
   // GDDR6, not HBM — the hbm* fields hold GDDR capacity/bandwidth (see header).
