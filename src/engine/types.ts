@@ -489,6 +489,7 @@ export interface MemorySide {
   perRank?: {
     weights: number
     kvCachePerRequest: number
+    kvCacheTotal: number       // per-rank KV across per-replica concurrency
     activations: number
     total: number
     headroom: number
@@ -512,6 +513,7 @@ export interface MemoryResult {
   perRank?: {
     weights: number
     kvCachePerRequest: number
+    kvCacheTotal: number       // per-rank KV across per-replica concurrency
     activationsPeak: number
     total: number
     headroom: number
