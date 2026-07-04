@@ -31,13 +31,20 @@
 <section class="controls">
   <div class="row">
     <span class="lbl">Compare</span>
-    <label><input type="radio" checked={$comparePivot.kind === 'sku'} onchange={() => setComparePivotKind('sku')} /> models on one accelerator</label>
-    <label><input type="radio" checked={$comparePivot.kind === 'model'} onchange={() => setComparePivotKind('model')} /> accelerators for one model</label>
+    <label><input type="radio" name="compare-pivot" checked={$comparePivot.kind === 'sku'} onchange={() => setComparePivotKind('sku')} /> models on one accelerator</label>
+    <label><input type="radio" name="compare-pivot" checked={$comparePivot.kind === 'model'} onchange={() => setComparePivotKind('model')} /> accelerators for one model</label>
   </div>
 
   <div class="row">
     <span class="lbl">{$comparePivot.kind === 'sku' ? 'Accelerator' : 'Model'} (fixed)</span>
-    <select value={$comparePivot.id} onchange={e => comparePivot.update(p => ({ ...p, id: (e.currentTarget as HTMLSelectElement).value }))}>
+    <select value={$comparePivot.id} onchange={e => {
+      const newId = (e.currentTarget as HTMLSelectElement).value
+      comparePivot.update(p => ({ ...p, id: newId }))
+      // When the pivot IS the model, all candidates share it — reseed their quants.
+      if ($comparePivot.kind === 'model') {
+        compareCandidates.update(cs => cs.map(c => ({ ...c, quant: seededQuantFor(newId) })))
+      }
+    }}>
       {#each pivotOptions as o}<option value={o.id}>{o.name}</option>{/each}
     </select>
   </div>
@@ -52,7 +59,15 @@
     <span class="lbl">Candidates ({$comparePivot.kind === 'sku' ? 'models' : 'accelerators'})</span>
     {#each $compareCandidates as c, i}
       <div class="cand">
-        <select value={c.varyingId} onchange={e => compareCandidates.update(cs => cs.map((x, j) => j === i ? { ...x, varyingId: (e.currentTarget as HTMLSelectElement).value } : x))}>
+        <select value={c.varyingId} onchange={e => {
+          const newId = (e.currentTarget as HTMLSelectElement).value
+          compareCandidates.update(cs => cs.map((x, j) => {
+            if (j !== i) return x
+            // When the varying dimension IS the model, reseed quant; SKU changes don't affect it.
+            const quant = $comparePivot.kind === 'sku' ? seededQuantFor(newId) : x.quant
+            return { ...x, varyingId: newId, quant }
+          }))
+        }}>
           {#each varyingOptions as o}<option value={o.id}>{o.name}</option>{/each}
         </select>
         <span class="quant">{c.quant.weights} · kv {c.quant.kv} · act {c.quant.activations}</span>
@@ -63,6 +78,7 @@
   </div>
 </section>
 
+<p class="note">Throughput is aggregate at the shared concurrency (default 1 = single-stream). The Calculator batches to the KV-cap ceiling by default, so its numbers differ.</p>
 <CompareTable />
 
 <style>
@@ -76,4 +92,5 @@
   .rm:disabled { opacity: 0.3; cursor: default; }
   .add { align-self: flex-start; font: inherit; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 1px solid #c8c8c8; border-radius: 0.3rem; background: #fff; cursor: pointer; }
   select, input { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.4rem; }
+  .note { font-size: 0.8rem; color: #888; margin: 0 0 0.75rem; }
 </style>
