@@ -79,3 +79,45 @@ export function decodeCompare(payload: string): CompareState | null {
 
   return { pivot: { kind, id }, candidates, workload }
 }
+
+import { get } from 'svelte/store'
+import { comparePivot, compareCandidates, compareWorkload } from './stores'
+import { parseRoute } from './route'
+
+function readStoreCompareState(): CompareState {
+  return { pivot: get(comparePivot), candidates: get(compareCandidates), workload: get(compareWorkload) }
+}
+
+function applyCompareState(s: CompareState): void {
+  comparePivot.set(s.pivot)
+  compareCandidates.set(s.candidates)
+  compareWorkload.set(s.workload)
+}
+
+// Read the compare payload from the URL on load, iff the hash targets the
+// compare tab. No-op otherwise (calc/sim links are handled by share.ts).
+export function readCompareUrlIntoStores(): void {
+  if (typeof window === 'undefined') return
+  const h = window.location.hash.replace(/^#/, '')
+  if (!h.startsWith('compare?')) return
+  const decoded = decodeCompare(h.slice('compare?'.length))
+  if (decoded) applyCompareState(decoded)
+}
+
+// Mirror the compare stores back to the hash while on the compare tab. Mirrors
+// share.ts.startUrlSync structure (hold `ready` until all subs wired).
+export function startCompareUrlSync(): () => void {
+  if (typeof window === 'undefined') return () => {}
+  let ready = false
+  const write = () => {
+    if (!ready) return
+    if (parseRoute(window.location.hash).tab !== 'compare') return
+    const encoded = encodeCompare(readStoreCompareState())
+    const next = `${window.location.pathname}${window.location.search}#compare?${encoded}`
+    window.history.replaceState(window.history.state, '', next)
+  }
+  const unsubs = [comparePivot.subscribe(write), compareCandidates.subscribe(write), compareWorkload.subscribe(write)]
+  ready = true
+  write()
+  return () => unsubs.forEach(u => u())
+}
