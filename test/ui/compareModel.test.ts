@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveCompareInput, computeCompareRow, resolveVaryingName, type ComparePivot } from '../../src/ui/compareModel'
+import { resolveCompareInput, computeCompareRow, resolveVaryingName, type ComparePivot, defaultPivotId, firstVaryingId, seededQuantFor } from '../../src/ui/compareModel'
 import { ACCELERATORS, MODELS } from '../../src/data'
 import { SYSTEMS } from '../../src/data/systems'
 
@@ -78,5 +78,24 @@ describe('computeCompareRow', () => {
   it('resolveVaryingName resolves the opposite dimension', () => {
     expect(resolveVaryingName({ kind: 'sku', id: ACCELERATORS[0].id }, MODELS[0].id)).toBe(MODELS[0].name)
     expect(resolveVaryingName({ kind: 'model', id: MODELS[0].id }, 'ghost-id')).toBe('ghost-id')
+  })
+})
+
+describe('seeding helpers', () => {
+  it('defaultPivotId picks the pivot catalog; firstVaryingId picks the opposite', () => {
+    expect(defaultPivotId('sku')).toBe(ACCELERATORS[0].id)
+    expect(firstVaryingId('sku')).toBe(MODELS[0].id)
+    expect(defaultPivotId('model')).toBe(MODELS[0].id)
+    expect(firstVaryingId('model')).toBe(ACCELERATORS[0].id)
+  })
+
+  it('seededQuantFor uses the model native dtype for weights, fp16 kv', () => {
+    const q = seededQuantFor(MODELS[0].id)
+    expect(q.weights).toBe(MODELS[0].nativeDtype)
+    expect(q.kv).toBe('fp16')
+  })
+
+  it('seededQuantFor falls back to fp16 for an unknown model', () => {
+    expect(seededQuantFor('ghost')).toEqual({ weights: 'fp16', kv: 'fp16', activations: 'fp16' })
   })
 })

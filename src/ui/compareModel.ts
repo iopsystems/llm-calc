@@ -6,7 +6,7 @@ import { ACCELERATORS, MODELS } from '../data'
 import { SYSTEMS } from '../data/systems'
 import { defaultParallelism } from '../engine/parallelism'
 import { calculate } from '../engine'
-import type { CalcInput, MultiDeviceConfig, Quantization, Workload, CalcResult, PerfTier } from '../engine/types'
+import type { CalcInput, MultiDeviceConfig, Quantization, Workload, CalcResult, PerfTier, Dtype } from '../engine/types'
 
 export type ComparePivotKind = 'sku' | 'model'
 export interface ComparePivot { kind: ComparePivotKind; id: string }
@@ -99,4 +99,26 @@ export function computeCompareRow(
   } catch (err) {
     return { ok: false, name, candidate, error: (err as Error).message }
   }
+}
+
+export function defaultPivotId(kind: ComparePivotKind): string {
+  return kind === 'sku' ? ACCELERATORS[0].id : MODELS[0].id
+}
+
+export function firstVaryingId(kind: ComparePivotKind): string {
+  return kind === 'sku' ? MODELS[0].id : ACCELERATORS[0].id
+}
+
+// 4-bit ship formats (int4/fp4) run their matmuls in bf16 after in-kernel
+// dequant — no datacenter chip exposes 4-bit tensor cores — so seed activations
+// to bf16 there, mirroring stores.defaultActivationsFor. Kept as a local copy to
+// keep this module Svelte/stores-free (stores imports this module).
+function activationsFor(native: Dtype): Dtype {
+  return native === 'int4' || native === 'fp4' ? 'bf16' : native
+}
+
+export function seededQuantFor(modelId: string): Quantization {
+  const m = MODELS.find(x => x.id === modelId)
+  if (!m) return { weights: 'fp16', kv: 'fp16', activations: 'fp16' }
+  return { weights: m.nativeDtype, kv: 'fp16', activations: activationsFor(m.nativeDtype) }
 }
