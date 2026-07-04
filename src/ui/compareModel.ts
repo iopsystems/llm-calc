@@ -5,7 +5,8 @@
 import { ACCELERATORS, MODELS } from '../data'
 import { SYSTEMS } from '../data/systems'
 import { defaultParallelism } from '../engine/parallelism'
-import type { CalcInput, MultiDeviceConfig, Quantization, Workload } from '../engine/types'
+import { calculate } from '../engine'
+import type { CalcInput, MultiDeviceConfig, Quantization, Workload, CalcResult, PerfTier } from '../engine/types'
 
 export type ComparePivotKind = 'sku' | 'model'
 export interface ComparePivot { kind: ComparePivotKind; id: string }
@@ -42,4 +43,60 @@ export function resolveCompareInput(
   return pivot.kind === 'sku'
     ? buildInput(candidate.varyingId, pivot.id, candidate.quant, workload)   // pivot = sku, varying = model
     : buildInput(pivot.id, candidate.varyingId, candidate.quant, workload)   // pivot = model, varying = sku
+}
+
+export interface CompareMetrics {
+  ttftMs: number
+  tpotMs: number
+  throughputTokS: number
+  kvTotalGB: number
+  fits: boolean
+  regime: 'compute' | 'memory' | 'comms'
+}
+
+export type CompareRow =
+  | { ok: true;  name: string; candidate: CompareCandidate; metrics: CompareMetrics }
+  | { ok: false; name: string; candidate: CompareCandidate; error: string }
+
+// The comparison reports the peak (theoretical) operating point — the same tier
+// the roofline panel treats as "Theoretical". Fall back to the first available
+// point for any accelerator that has no 'peak' id.
+export function pickPerfTier(result: CalcResult): PerfTier | null {
+  return result.perf['peak'] ?? Object.values(result.perf)[0] ?? null
+}
+
+// Display name of the *varying* dimension (the opposite of the pivot kind).
+export function resolveVaryingName(pivot: ComparePivot, varyingId: string): string {
+  if (pivot.kind === 'sku') {
+    return MODELS.find(m => m.id === varyingId)?.name ?? varyingId
+  }
+  return SYSTEMS.find(s => s.id === varyingId)?.name
+    ?? ACCELERATORS.find(a => a.id === varyingId)?.name
+    ?? varyingId
+}
+
+export function computeCompareRow(
+  pivot: ComparePivot, candidate: CompareCandidate, workload: Workload,
+): CompareRow {
+  const name = resolveVaryingName(pivot, candidate.varyingId)
+  const input = resolveCompareInput(pivot, candidate, workload)
+  if (!input) return { ok: false, name, candidate, error: 'unknown model or accelerator' }
+  try {
+    const result = calculate(input)
+    const perf = pickPerfTier(result)
+    if (!perf) return { ok: false, name, candidate, error: 'no operating point' }
+    return {
+      ok: true, name, candidate,
+      metrics: {
+        ttftMs: perf.ttftS * 1000,
+        tpotMs: perf.decode.timePerTokenS * 1000,
+        throughputTokS: perf.decode.aggregateTokensPerS,
+        kvTotalGB: result.memory.kvCacheTotal / 1e9,
+        fits: result.memory.fits,
+        regime: perf.decode.regime,
+      },
+    }
+  } catch (err) {
+    return { ok: false, name, candidate, error: (err as Error).message }
+  }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveCompareInput, type ComparePivot } from '../../src/ui/compareModel'
+import { resolveCompareInput, computeCompareRow, resolveVaryingName, type ComparePivot } from '../../src/ui/compareModel'
 import { ACCELERATORS, MODELS } from '../../src/data'
 import { SYSTEMS } from '../../src/data/systems'
 
@@ -38,5 +38,45 @@ describe('resolveCompareInput', () => {
   it('returns null for an unknown pivot id', () => {
     const pivot: ComparePivot = { kind: 'sku', id: 'nope-not-a-sku' }
     expect(resolveCompareInput(pivot, { varyingId: MODELS[0].id, quant: fp16 }, wl)).toBeNull()
+  })
+})
+
+describe('computeCompareRow', () => {
+  it('produces an ok row with finite metrics for a valid candidate', () => {
+    const row = computeCompareRow(
+      { kind: 'sku', id: ACCELERATORS[0].id },
+      { varyingId: MODELS[0].id, quant: fp16 }, wl,
+    )
+    expect(row.ok).toBe(true)
+    if (row.ok) {
+      expect(Number.isFinite(row.metrics.ttftMs)).toBe(true)
+      expect(Number.isFinite(row.metrics.tpotMs)).toBe(true)
+      expect(row.metrics.throughputTokS).toBeGreaterThan(0)
+      expect(['compute', 'memory', 'comms']).toContain(row.metrics.regime)
+      expect(row.name).toBe(MODELS[0].name)
+    }
+  })
+
+  it('isolates errors: an unresolvable candidate becomes an error row, not a throw', () => {
+    const row = computeCompareRow(
+      { kind: 'sku', id: ACCELERATORS[0].id },
+      { varyingId: 'nope-not-a-model', quant: fp16 }, wl,
+    )
+    expect(row.ok).toBe(false)
+    if (!row.ok) expect(row.error).toMatch(/unknown/i)
+  })
+
+  it('isolates engine errors: an unsupported quant becomes an error row', () => {
+    // fp4 activations: no datacenter accelerator lists fp4 TFLOPS → calculate throws.
+    const row = computeCompareRow(
+      { kind: 'sku', id: ACCELERATORS[0].id },
+      { varyingId: MODELS[0].id, quant: { weights: 'fp16', kv: 'fp16', activations: 'fp4' } }, wl,
+    )
+    expect(row.ok).toBe(false)
+  })
+
+  it('resolveVaryingName resolves the opposite dimension', () => {
+    expect(resolveVaryingName({ kind: 'sku', id: ACCELERATORS[0].id }, MODELS[0].id)).toBe(MODELS[0].name)
+    expect(resolveVaryingName({ kind: 'model', id: MODELS[0].id }, 'ghost-id')).toBe('ghost-id')
   })
 })
