@@ -33,7 +33,14 @@ export interface ModelMetrics {
   kvBytesPerToken: number
   gqaRatio: number
   attentionLabel: string
+  mtpLabel: string
   moeActiveRatio?: number
+}
+
+// tokens/step = 1 + depth, matching the engine's mtpFactor in decode.ts.
+function mtpLabel(m: ModelArch): string {
+  if (m.numNextnLayers === 0) return 'No'
+  return `Yes — depth ${m.numNextnLayers} (${m.numNextnLayers + 1} tokens/step)`
 }
 
 export function modelMetrics(m: ModelArch): ModelMetrics {
@@ -43,6 +50,7 @@ export function modelMetrics(m: ModelArch): ModelMetrics {
     kvBytesPerToken: perLayer * m.layers,
     gqaRatio: m.numHeads / m.numKvHeads,
     attentionLabel: attentionLabel(m),
+    mtpLabel: mtpLabel(m),
   }
   if (m.architecture.type === 'moe') {
     out.moeActiveRatio = activeParams(m) / m.paramCount

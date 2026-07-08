@@ -27,6 +27,27 @@ describe('modelMetrics', () => {
     const m = MODELS.find(x => x.id === 'llama-3.3-70b')!
     expect(modelMetrics(m).moeActiveRatio).toBeUndefined()
   })
+  it('MTP model labels multi-token prediction with depth and tokens/step', () => {
+    const m = MODELS.find(x => x.id === 'deepseek-v3')!
+    expect(m.numNextnLayers).toBe(1)
+    expect(modelMetrics(m).mtpLabel).toBe('Yes — depth 1 (2 tokens/step)')
+  })
+  it('deeper MTP reflects depth in tokens/step', () => {
+    const m = MODELS.find(x => x.numNextnLayers === 3)!
+    expect(modelMetrics(m).mtpLabel).toBe('Yes — depth 3 (4 tokens/step)')
+  })
+  it('non-MTP model labels multi-token prediction as No', () => {
+    const m = MODELS.find(x => x.id === 'llama-3.3-70b')!
+    expect(m.numNextnLayers).toBe(0)
+    expect(modelMetrics(m).mtpLabel).toBe('No')
+  })
+  it('every model gets an MTP label consistent with numNextnLayers', () => {
+    for (const m of MODELS) {
+      const label = modelMetrics(m).mtpLabel
+      if (m.numNextnLayers > 0) expect(label).toContain(`depth ${m.numNextnLayers}`)
+      else expect(label).toBe('No')
+    }
+  })
 })
 
 describe('skuMetrics', () => {

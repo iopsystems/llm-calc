@@ -29,6 +29,7 @@
     <dd>{arch.type === 'moe' ? 'Mixture of experts' : 'Dense'}</dd>
     <dt>Attention</dt><dd>{m.attentionLabel}</dd>
     <dt>Native precision</dt><dd>{model.nativeDtype}</dd>
+    <dt>Multi-token prediction</dt><dd>{m.mtpLabel}</dd>
   </dl>
 
   <div class="rule"></div>
@@ -60,9 +61,6 @@
   <dl>
     <dt>Vocab</dt><dd>{model.vocabSize.toLocaleString()}</dd>
     <dt>Max context</dt><dd>{model.maxContext.toLocaleString()} tokens</dd>
-    {#if model.numNextnLayers > 0}
-      <dt>MTP depth</dt><dd>{model.numNextnLayers}</dd>
-    {/if}
   </dl>
 
   <div class="rule"></div>
