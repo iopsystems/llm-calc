@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { encodeState, decodeState, type ShareableState } from '../../src/ui/share'
+import { encodeState, decodeState, tabPayloadFromHash, type ShareableState } from '../../src/ui/share'
 import { ACCELERATORS, MODELS } from '../../src/data'
 import { SYSTEMS } from '../../src/data/systems'
 
@@ -194,6 +194,13 @@ describe('encodeState then decodeState', () => {
     const round = decodeState(encodeState(state))
     expect(round.disaggKvTransferFabricId).toBe('ib-ndr')
     expect(round.disaggFirstTokenOnPrefill).toBe(false)
+  })
+})
+
+describe('tabPayloadFromHash', () => {
+  it('compare hash does not leak into calc or sim tabs', () => {
+    expect(tabPayloadFromHash('#compare?pt=1024&ot=256', 'calc')).toBe('')
+    expect(tabPayloadFromHash('#compare?pt=1024&ot=256', 'sim')).toBe('')
   })
 })
 

@@ -1,4 +1,4 @@
-import { writable, derived, type Readable } from 'svelte/store'
+import { writable, derived, get, type Readable } from 'svelte/store'
 import { ACCELERATORS, MODELS } from '../data'
 import { SYSTEMS } from '../data/systems'
 import { calculate } from '../engine'
@@ -6,6 +6,10 @@ import { defaultParallelism, type ParallelismConfig } from '../engine/parallelis
 import type { CalcInput, CalcResult, Dtype, MultiDeviceConfig, Quantization, Workload } from '../engine/types'
 import { computeNMax } from '../engine/queueModel'
 import { groupedDisaggFabrics } from './disaggFabrics'
+import {
+  computeCompareRow, defaultPivotId, firstVaryingId, seededQuantFor,
+  type ComparePivot, type ComparePivotKind, type CompareCandidate, type CompareRow,
+} from './compareModel'
 
 const defaultAccelerator = ACCELERATORS[0]
 const defaultModel = MODELS[0]
@@ -375,3 +379,40 @@ export const simError:       Readable<string | null> = derived(simComputedMonoli
 // lacks the workload's activations dtype. Surface separately so the disagg
 // block can render an inline error instead of silently disappearing.
 export const simErrorDisagg: Readable<string | null> = derived(simComputedDisagg,     $c => $c.error)
+
+// --- Compare tab ---
+// Fully independent of the single-selection calc/sim stores (the calc `input`
+// derivation assumes scalar model/sku; compare holds lists). Pivot = the locked
+// dimension; each candidate carries the varying id + its own quant.
+export const comparePivot = writable<ComparePivot>({ kind: 'sku', id: defaultPivotId('sku') })
+export const compareCandidates = writable<CompareCandidate[]>([
+  { varyingId: firstVaryingId('sku'), quant: seededQuantFor(firstVaryingId('sku')) },
+])
+export const compareWorkload = writable<Workload>({ promptTokens: 2048, outputTokens: 512, concurrency: 1 })
+
+export const compareResults: Readable<CompareRow[]> = derived(
+  [comparePivot, compareCandidates, compareWorkload],
+  ([$pivot, $candidates, $workload]) =>
+    $candidates.map(c => computeCompareRow($pivot, c, $workload)),
+)
+
+// Flip the pivot axis. A model-list can't remain valid as a sku-list, so
+// candidates are hard-cleared and reseeded with one default on the new axis;
+// the shared workload is preserved.
+export function setComparePivotKind(kind: ComparePivotKind): void {
+  comparePivot.set({ kind, id: defaultPivotId(kind) })
+  const seedId = firstVaryingId(kind)
+  const seedQuant = kind === 'sku' ? seededQuantFor(seedId) : seededQuantFor(defaultPivotId(kind))
+  compareCandidates.set([{ varyingId: seedId, quant: seedQuant }])
+}
+
+// Seed the compare view from the current calc selection so "compare this
+// against…" is one click. Always uses the SKU pivot (fixed = current
+// accelerator or system, candidate = current model). Called at startup only
+// when the URL carried no compare payload, so a shared compare link always wins.
+export function seedCompareFromCalc(): void {
+  const sku = get(systemId) || get(acceleratorId)
+  const model = get(modelId)
+  comparePivot.set({ kind: 'sku', id: sku })
+  compareCandidates.set([{ varyingId: model, quant: seededQuantFor(model) }])
+}

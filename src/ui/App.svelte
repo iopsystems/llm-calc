@@ -7,6 +7,7 @@
   import TabBar from './TabBar.svelte'
   import InfoPanel from './InfoPanel.svelte'
   import Simulator from './Simulator.svelte'
+  import CompareTab from './CompareTab.svelte'
   import { route } from './route'
   import { error, showMath } from './stores'
   import { buildShareUrl } from './share'
@@ -53,6 +54,8 @@
     <InfoPanel />
   {:else if $route.tab === 'sim'}
     <Simulator />
+  {:else if $route.tab === 'compare'}
+    <CompareTab />
   {:else}
     <InputPanel />
     {#if $error}

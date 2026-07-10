@@ -6,6 +6,7 @@ import { writable } from 'svelte/store'
 export type Route =
   | { tab: 'calc' }
   | { tab: 'sim' }
+  | { tab: 'compare' }
   | { tab: 'info' }
   | { tab: 'info'; detail: { kind: 'model' | 'sku'; id: string } }
 
@@ -15,6 +16,7 @@ export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#/, '')
   if (h === '' || h === 'calc' || h.startsWith('calc?')) return { tab: 'calc' }
   if (h === 'sim'  || h.startsWith('sim?'))  return { tab: 'sim' }
+  if (h === 'compare' || h.startsWith('compare?')) return { tab: 'compare' }
   if (h === 'info') return { tab: 'info' }
   const m = h.match(/^info\/(model|sku)\/(.+)$/)
   if (m) return { tab: 'info', detail: { kind: m[1] as 'model' | 'sku', id: m[2] } }
@@ -28,6 +30,7 @@ export function parseRoute(hash: string): Route {
 export function serializeRoute(route: Route, payload = ''): string {
   if (route.tab === 'calc') return payload ? `#calc?${payload}` : '#calc'
   if (route.tab === 'sim')  return payload ? `#sim?${payload}`  : '#sim'
+  if (route.tab === 'compare') return payload ? `#compare?${payload}` : '#compare'
   if ('detail' in route) return `#info/${route.detail.kind}/${route.detail.id}`
   return '#info'
 }

@@ -5,6 +5,7 @@
   const tabs = [
     { id: 'calc' as const, label: 'Calculator' },
     { id: 'sim'  as const, label: 'Simulator' },
+    { id: 'compare' as const, label: 'Compare' },
     { id: 'info' as const, label: 'Info' },
   ]
 </script>
