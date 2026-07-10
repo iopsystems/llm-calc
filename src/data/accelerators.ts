@@ -348,6 +348,35 @@ export const ACCELERATORS: AcceleratorSpec[] = [
     }]
   },
   {
+    id: 'dgx-spark', name: 'NVIDIA DGX Spark (GB10)', vendor: 'NVIDIA', family: 'Blackwell',
+    // GA 2025-10-15 (announced as "Project DIGITS" at CES 2025, renamed DGX
+    // Spark at GTC). Unified-memory desktop built on the GB10 Grace Blackwell
+    // Superchip: a Blackwell GPU (5th-gen Tensor Cores, 6144 CUDA cores) + a
+    // 20-core Arm Grace CPU sharing 128GB LPDDR5X. Like the Apple SoCs, the
+    // capacity below is unified system memory shared with the OS and CPU, so
+    // usable headroom is materially lower than 128GB.
+    releaseDate: '2025-10', tier: 'consumer',
+    variants: [{
+      id: 'unified-128', label: '128GB', hbmCapacityGB: 128,
+      // 140W: the GB10 SoC TDP (docs.nvidia.com/dgx/dgx-spark hardware page).
+      // This is the whole-SoC thermal envelope (CPU+GPU shared), not a
+      // GPU-only figure — the 240W external PSU powers the full system.
+      powerCapW: 140,
+      operatingPoints: [{
+        id: 'peak', label: 'Peak',
+        // NVIDIA quotes "up to 1 PFLOP at FP4 precision with sparsity" (DGX
+        // Spark hardware page). Recording dense halves per the skill: FP4
+        // dense 500, then the Blackwell 2× dtype ladder down — FP8/INT8 dense
+        // 250, BF16/FP16 dense 125. The 125 BF16 corroborates against NVIDIA's
+        // quoted 31 TFLOPS FP32 (~4× tensor:FP32, the usual Blackwell ratio).
+        tflops: { fp16: 125, bf16: 125, fp8: 250, int8: 250, fp4: 500 },
+        // 273 GB/s LPDDR5X (256-bit interface); not HBM — the field holds the
+        // unified-memory bandwidth, per the file header.
+        hbmBandwidthGBs: 273
+      }]
+    }]
+  },
+  {
     id: 'mi300x', name: 'AMD Instinct MI300X', vendor: 'AMD', family: 'CDNA3',
     releaseDate: '2023-12', tier: 'datacenter',
     variants: [{
