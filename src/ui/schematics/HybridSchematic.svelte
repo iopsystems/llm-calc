@@ -15,4 +15,5 @@
 <Arrow x1={228} y1={48} x2={400} y2={98} label="" />
 <Mem x={30} y={100} w={180} h={56} label="sliding caches" sub="w rows per layer · bounded" color="window" />
 <Mem x={320} y={100} w={220} h={56} label="global caches" sub="one row per token per layer · grows" color="full" />
-<text x="8" y="176" font-size="10" fill="#555">The global layers carry the whole prompt; the sliding layers add a fixed cost. Which layers are global is fixed by the paper, not stored in the catalog.</text>
+<text x="8" y="170" font-size="10" fill="#555">The global layers carry the whole prompt; the sliding layers add a fixed cost.</text>
+<text x="8" y="182" font-size="10" fill="#555">Which layers are global is fixed by the paper, not stored in the catalog.</text>

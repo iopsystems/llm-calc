@@ -23,8 +23,8 @@
   </defs>
   <svelte:component this={component} />
   <line x1="0" y1="196" x2="640" y2="196" stroke="#ddd" />
-  <text x="0" y="212" class="lbl">LEAVES PER TOKEN</text>
-  <text x="0" y="228" class="txt">{meta.leaves}</text>
+  <text x="8" y="212" class="lbl">LEAVES PER TOKEN</text>
+  <text x="8" y="228" class="txt">{meta.leaves}</text>
   <text x="240" y="212" class="lbl">READS AT DECODE</text>
   <text x="240" y="228" class="txt">{meta.reads}</text>
   <text x="480" y="212" class="lbl">MEMORY</text>

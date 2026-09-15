@@ -48,3 +48,14 @@ describe('schematic registry', () => {
     expect(moe).not.toContain('llama-3.1-8b')
   })
 })
+
+describe('footprint strip fits its columns', () => {
+  // Three columns at x=8/240/480 in a 640px viewBox: 232px of pitch,
+  // ~44 characters at 10.5px type before a column runs into its neighbour.
+  it('leaves and reads are at most 44 characters', () => {
+    for (const s of [...Object.values(ATTENTION_SCHEMATICS), ...Object.values(FFN_SCHEMATICS)]) {
+      expect(s.leaves.length, `${s.id} leaves: ${s.leaves}`).toBeLessThanOrEqual(44)
+      expect(s.reads.length, `${s.id} reads: ${s.reads}`).toBeLessThanOrEqual(44)
+    }
+  })
+})
