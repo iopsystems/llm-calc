@@ -73,10 +73,10 @@
       </text>
     {:else if h.state}
       {@const rw = Math.min(120, h.state.dim)}
-      {@const rh = Math.min(40, h.state.inner * 40 / Math.max(h.state.inner, h.state.dim))}
+      {@const rh = Math.min(24, h.state.inner * 24 / Math.max(h.state.inner, h.state.dim))}
       <rect x={BX} y={hy} width={rw} height={rh} fill="none" stroke={KIND_COLORS.state} stroke-width="1.5" />
       <text x={BX + rw + 8} y={hy + 12} class="txt">× {h.state.heads} heads</text>
-      <text x={BX} y={hy + rh + 14} class="txt">
+      <text x={BX} y={hy + rh + 12} class="txt">
         state {h.state.heads} × {h.state.dim} × {h.state.inner} = {(h.state.heads * h.state.dim * h.state.inner).toLocaleString()} elements per layer
       </text>
     {/if}
