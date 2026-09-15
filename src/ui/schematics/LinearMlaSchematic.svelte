@@ -4,6 +4,7 @@
   import Mem from './parts/Mem.svelte'
   import Arrow from './parts/Arrow.svelte'
   import { KIND_COLORS } from '../figure/types'
+  // The paper's fixed ratio (3 KDA : 1 MLA, full attention every 4th layer); the catalog carries counts, not order.
   const PATTERN = ['state', 'state', 'state', 'full'] as const
 </script>
 <text x="8" y="20" font-size="10.5" fill="#666" letter-spacing="0.06em">KDA BLOCK</text>
@@ -13,7 +14,7 @@
 <Arrow x1={210} y1={57} x2={250} y2={57} label="update" />
 <Mem x={250} y={30} w={170} h={54} label="state S per head" sub="d × d, fixed size" color="state" />
 <Arrow x1={335} y1={84} x2={335} y2={112} label="S ← α S + β (v − S k) kᵀ" />
-<Arrow x1={420} y1={57} x2={460} y2={57} label="o = q · S" />
+<Arrow x1={420} y1={57} x2={460} y2={57} label="q·S" />
 <Box x={460} y={40} w={80} h={34} label="out" />
 <text x="8" y="146" font-size="10.5" fill="#666" letter-spacing="0.06em">STACK</text>
 {#each PATTERN as k, i}

@@ -4,15 +4,16 @@
   import Mem from './parts/Mem.svelte'
   import Arrow from './parts/Arrow.svelte'
   import { KIND_COLORS } from '../figure/types'
+  // The paper's fixed ratio (3 DeltaNet : 1 gated attention, full_attention_interval 4); the catalog carries counts, not order.
   const PATTERN = ['state', 'state', 'state', 'full'] as const
 </script>
 <text x="8" y="20" font-size="10.5" fill="#666" letter-spacing="0.06em">GATED DELTANET BLOCK</text>
 <Box x={8} y={40} w={44} h={34} label="x_t" />
 <Arrow x1={52} y1={57} x2={90} y2={57} />
 <Box x={90} y={40} w={120} h={34} label="W_q W_k W_v" sub="+ decay gate, β" />
-<Arrow x1={210} y1={57} x2={250} y2={57} label="delta rule" />
+<Arrow x1={210} y1={57} x2={250} y2={57} label="Δ rule" />
 <Mem x={250} y={30} w={170} h={54} label="state S per head" sub="d × d, fixed size" color="state" />
-<Arrow x1={420} y1={57} x2={460} y2={57} label="o = q · S" />
+<Arrow x1={420} y1={57} x2={460} y2={57} label="q·S" />
 <Box x={460} y={40} w={80} h={34} label="out" />
 <text x="8" y="146" font-size="10.5" fill="#666" letter-spacing="0.06em">STACK</text>
 {#each PATTERN as k, i}
