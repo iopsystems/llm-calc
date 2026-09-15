@@ -123,3 +123,48 @@ describe('lanesFor — latent and sparse variants', () => {
     expect(lanes.map(l => [l.kind, l.count])).toEqual([['csa', 30], ['hca', 31]])
   })
 })
+
+describe('lanesFor — recurrent-state variants', () => {
+  it('linear-mla-hybrid: KDA state lane then MLA latent lane', () => {
+    const lanes = lanesFor(byId('kimi-linear'))
+    expect(lanes.map(l => [l.kind, l.count])).toEqual([['kda', 20], ['mla', 7]])
+    expect(lanes[0]).toMatchObject({
+      color: 'state',
+      cache: { glyph: 'state', bytesPerToken: 0, fixedBytes: 32 * 128 * 128 * 2 },
+      reach: { glyph: 'state', label: 'one state read' },
+    })
+    expect(lanes[0].cache.label).toBe('32 heads × 128² state · 1 MiB per layer')
+    expect(lanes[1].cache).toMatchObject({ glyph: 'latent', bytesPerToken: (512 + 64) * 2 })
+  })
+
+  it('delta-hybrid: DeltaNet state lane then full-attention lane', () => {
+    const lanes = lanesFor(byId('qwen3.5-397b-a17b'))
+    expect(lanes.map(l => [l.kind, l.count])).toEqual([['delta', 45], ['full', 15]])
+    expect(lanes[0].cache).toMatchObject({ glyph: 'state', fixedBytes: 64 * 128 * 128 * 2 })
+    expect(lanes[0].cache.label).toBe('64 heads × 128² state · 2 MiB per layer')
+    expect(lanes[1].cache).toMatchObject({ glyph: 'kv', bytesPerToken: 2048 })
+  })
+
+  it('mamba2-hybrid: Mamba state (fp32) lane, attention lane, FFN-only lane', () => {
+    const lanes = lanesFor(byId('nemotron-3-nano-30b-a3b'))
+    expect(lanes.map(l => [l.kind, l.count])).toEqual([['mamba', 23], ['full', 6], ['ffn', 23]])
+    expect(lanes[0].cache).toMatchObject({ glyph: 'state', fixedBytes: 64 * 64 * 128 * 4 })
+    expect(lanes[0].cache.label).toBe('64 heads × 64 × 128 fp32 state · 2 MiB per block')
+    expect(lanes[2]).toMatchObject({ kind: 'ffn', color: 'none', cache: { glyph: 'none' }, reach: { glyph: 'none' } })
+  })
+})
+
+describe('lanesFor — catalog-wide invariants', () => {
+  it('handles every model, counts sum to layers, bytes are finite and non-negative', () => {
+    for (const m of MODELS) {
+      const lanes = lanesFor(m)
+      expect(lanes.length, m.id).toBeGreaterThan(0)
+      expect(lanes.reduce((n, l) => n + l.count, 0), m.id).toBe(m.layers)
+      for (const l of lanes) {
+        expect(l.count, `${m.id} ${l.kind}`).toBeGreaterThan(0)
+        expect(Number.isFinite(l.cache.bytesPerToken) && l.cache.bytesPerToken >= 0, `${m.id} ${l.kind}`).toBe(true)
+        expect(Number.isFinite(l.cache.fixedBytes) && l.cache.fixedBytes >= 0, `${m.id} ${l.kind}`).toBe(true)
+      }
+    }
+  })
+})

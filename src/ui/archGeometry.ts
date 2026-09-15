@@ -75,6 +75,11 @@ function latentCache(rank: number, rope: number, p: number): Lane['cache'] {
 const topkReach = (tokens: number, label: string, local?: number): Lane['reach'] =>
   ({ glyph: 'topk', tokens, label, ...(local === undefined ? {} : { local }) })
 
+const STATE_REACH: Lane['reach'] = { glyph: 'state', label: 'one state read' }
+function stateCache(fixedBytes: number, label: string): Lane['cache'] {
+  return { glyph: 'state', bytesPerToken: 0, fixedBytes, label }
+}
+
 export function lanesFor(m: ModelArch): Lane[] {
   const att = m.attention
   const p = kvBytesPerTokenPerLayer(m, KV_REF_DTYPE)
@@ -124,8 +129,35 @@ export function lanesFor(m: ModelArch): Lane[] {
       }))
       return lanes
     }
-    default:
-      // Remaining variants land in Tasks 4 and 5; the never-check arrives with the last one.
-      throw new Error(`lanesFor: variant not yet handled: ${att.type}`)
+    case 'linear-mla-hybrid': {
+      const per = att.numLinearHeads * att.linearHeadDim * att.linearHeadDim * bytesOf(KV_REF_DTYPE)
+      return [
+        lane('kda', att.numLinearLayers,
+          stateCache(per, `${att.numLinearHeads} heads × ${att.linearHeadDim}² state · ${fmtBytes(per)} per layer`), STATE_REACH),
+        lane('mla', att.numFullLayers, latentCache(att.kvLoraRank, att.qkRopeHeadDim, p), ALL_REACH),
+      ]
+    }
+    case 'delta-hybrid': {
+      const per = att.numDeltaNetHeads * att.deltaHeadDim * att.deltaHeadDim * bytesOf(KV_REF_DTYPE)
+      return [
+        lane('delta', att.numDeltaNetLayers,
+          stateCache(per, `${att.numDeltaNetHeads} heads × ${att.deltaHeadDim}² state · ${fmtBytes(per)} per layer`), STATE_REACH),
+        lane('full', att.numFullLayers, kvCache(m, p), ALL_REACH),
+      ]
+    }
+    case 'mamba2-hybrid': {
+      // fp32 by config (mamba_ssm_cache_dtype), independent of the KV reference.
+      const per = att.numMambaHeads * att.mambaHeadDim * att.ssmStateSize * 4
+      return [
+        lane('mamba', att.numMambaLayers,
+          stateCache(per, `${att.numMambaHeads} heads × ${att.mambaHeadDim} × ${att.ssmStateSize} fp32 state · ${fmtBytes(per)} per block`), STATE_REACH),
+        lane('full', att.numFullLayers, kvCache(m, p), ALL_REACH),
+        lane('ffn', att.numFfnLayers, NONE_CACHE, NONE_REACH),
+      ]
+    }
+    default: {
+      const _exhaustive: never = att
+      throw new Error(`lanesFor: unhandled attention variant ${(_exhaustive as { type: string }).type}`)
+    }
   }
 }
