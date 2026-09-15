@@ -55,3 +55,14 @@ describe('serializeRoute(calc) preserves an explicit payload', () => {
     expect(serializeRoute({ tab: 'calc' }, 'a=h100')).toBe('#calc?a=h100')
   })
 })
+
+describe('compare route', () => {
+  it('parses #compare and #compare?<payload>', () => {
+    expect(parseRoute('#compare')).toEqual({ tab: 'compare' })
+    expect(parseRoute('#compare?piv=sku:h100')).toEqual({ tab: 'compare' })
+  })
+  it('serializes the compare tab with an optional payload', () => {
+    expect(serializeRoute({ tab: 'compare' })).toBe('#compare')
+    expect(serializeRoute({ tab: 'compare' }, 'piv=sku:h100')).toBe('#compare?piv=sku:h100')
+  })
+})

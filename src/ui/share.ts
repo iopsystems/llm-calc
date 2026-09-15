@@ -372,7 +372,7 @@ export function tabPayloadFromHash(hash: string, tab: 'calc' | 'sim'): string {
   const h = hash.replace(/^#/, '')
   if (h === '' || h === tab) return ''
   if (h.startsWith(`${tab}?`)) return h.slice(tab.length + 1)
-  if (h.startsWith('calc') || h.startsWith('sim') || h.startsWith('info')) return ''
+  if (h.startsWith('calc') || h.startsWith('sim') || h.startsWith('info') || h.startsWith('compare')) return ''
   // Legacy bare payload: only honor it for the calc tab.
   return tab === 'calc' ? h : ''
 }
