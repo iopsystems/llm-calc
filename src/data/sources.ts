@@ -77,6 +77,10 @@ export const SOURCES = {
     title: 'Mistral 7B',
     url: 'https://arxiv.org/abs/2310.06825'
   },
+  'arxiv-2002-05202': {
+    title: 'GLU Variants Improve Transformer',
+    url: 'https://arxiv.org/abs/2002.05202'
+  },
   'arxiv-2503-19786': {
     title: 'Gemma 3 Technical Report',
     url: 'https://arxiv.org/abs/2503.19786'

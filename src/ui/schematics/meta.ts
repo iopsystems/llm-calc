@@ -93,7 +93,7 @@ export const FFN_SCHEMATICS: Record<ArchitectureConfig['type'], SchematicMeta> =
     id: 'dense', title: 'Dense FFN', group: 'ffn',
     summary: 'Up, gate and down projections. Every token pays the full intermediate width, and a decode step streams all of it from memory.',
     leaves: 'nothing', reads: 'the whole FFN weight', growth: 'none',
-    sources: ['arxiv-2305-13245'],
+    sources: ['arxiv-2002-05202'],
   },
   'moe': {
     id: 'moe', title: 'Mixture of experts', group: 'ffn',
