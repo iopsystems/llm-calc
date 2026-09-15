@@ -3,10 +3,39 @@
 import type {
   ModelArch, AcceleratorSpec, MultiAcceleratorSystem,
 } from '../engine/types'
-import { kvBytesPerTokenPerLayer, activeParams } from '../engine/memory'
+import {
+  kvBytesPerTokenPerLayer, activeParams, attendedSeqlenSummedOverLayers,
+  linearAttentionStateBytes, deltaStateBytes, mambaStateBytes,
+} from '../engine/memory'
+import { bytesOf } from '../engine/dtypes'
 import { SOURCES } from '../data/sources'
 
-const KV_REF_DTYPE = 'fp16' as const
+export const KV_REF_DTYPE = 'fp16' as const
+
+// Marginal cache bytes one token adds at sequence length `seqlen`, summed
+// over layers with the engine's own storage rule (windows contribute w/S of
+// a layer, compressed streams 1/M, recurrent state nothing). MSA keeps a
+// separate index-key row per sparse layer that the KV formula doesn't cover.
+export function kvBytesPerTokenAtContext(m: ModelArch, seqlen: number): number {
+  const perLayer = kvBytesPerTokenPerLayer(m, KV_REF_DTYPE)
+  const indexKey = m.attention.type === 'msa-hybrid'
+    ? m.attention.numSparseLayers * m.attention.indexHeadDim * bytesOf(KV_REF_DTYPE)
+    : 0
+  return perLayer * attendedSeqlenSummedOverLayers(m, seqlen, true) / seqlen + indexKey
+}
+
+// Per-request bytes that exist before the first token: recurrent state.
+export function fixedStateBytes(m: ModelArch): number {
+  return linearAttentionStateBytes(m, KV_REF_DTYPE)
+    + deltaStateBytes(m, KV_REF_DTYPE)
+    + mambaStateBytes(m)
+}
+
+// How much of the sequence attention math touches per decode step, in
+// full-layer equivalents. Distinguishes DSA (topK/S per layer) from MLA.
+export function attentionReachLayers(m: ModelArch, seqlen: number): number {
+  return attendedSeqlenSummedOverLayers(m, seqlen, false) / seqlen
+}
 
 function attentionLabel(m: ModelArch): string {
   switch (m.attention.type) {
@@ -31,7 +60,9 @@ function attentionLabel(m: ModelArch): string {
 
 export interface ModelMetrics {
   kvBytesPerTokenPerLayer: number
-  kvBytesPerToken: number
+  kvBytesPerToken: number        // at m.maxContext
+  fixedStateBytes: number
+  attentionReachLayers: number   // at m.maxContext
   gqaRatio: number
   attentionLabel: string
   mtpLabel: string
@@ -48,7 +79,9 @@ export function modelMetrics(m: ModelArch): ModelMetrics {
   const perLayer = kvBytesPerTokenPerLayer(m, KV_REF_DTYPE)
   const out: ModelMetrics = {
     kvBytesPerTokenPerLayer: perLayer,
-    kvBytesPerToken: perLayer * m.layers,
+    kvBytesPerToken: kvBytesPerTokenAtContext(m, m.maxContext),
+    fixedStateBytes: fixedStateBytes(m),
+    attentionReachLayers: attentionReachLayers(m, m.maxContext),
     gqaRatio: m.numHeads / m.numKvHeads,
     attentionLabel: attentionLabel(m),
     mtpLabel: mtpLabel(m),

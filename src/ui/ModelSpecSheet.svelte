@@ -8,6 +8,9 @@
   function kb(bytes: number): string {
     return bytes >= 1024 ? `${(bytes / 1024).toFixed(2)} KB` : `${bytes} B`
   }
+  function mb(bytes: number): string {
+    return `${(bytes / 1048576).toFixed(1)} MiB`
+  }
   function paramsStr(n: number): string {
     return n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : `${(n / 1e6).toFixed(0)}M`
   }
@@ -67,7 +70,12 @@
   <h3>Derived memory <span class="ref">(fp16 KV reference)</span></h3>
   <dl>
     <dt>KV / token / layer</dt><dd>{kb(m.kvBytesPerTokenPerLayer)}</dd>
-    <dt>KV / token (model)</dt><dd>{kb(m.kvBytesPerToken)}</dd>
+    <dt>KV / token (model, at max context)</dt><dd>{kb(m.kvBytesPerToken)}</dd>
+    {#if m.fixedStateBytes > 0}
+      <dt>Fixed state / request</dt><dd>{mb(m.fixedStateBytes)}</dd>
+    {/if}
+    <dt>Attention reach</dt>
+    <dd>{m.attentionReachLayers.toFixed(m.attentionReachLayers < 10 ? 2 : 0)} × S of {model.layers} blocks</dd>
   </dl>
 </article>
 
