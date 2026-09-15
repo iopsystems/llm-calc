@@ -12,8 +12,8 @@
 <Box x={96} y={78} w={110} h={36} label="W_dkv" sub="down-project" />
 <Box x={96} y={128} w={110} h={36} label="indexer" sub="lightning, few heads" />
 <Arrow x1={206} y1={96} x2={246} y2={96} label="cache" />
-<Mem x={246} y={78} w={140} h={36} label="latent + k_rope" sub="every token, unchanged from MLA" color="full" />
-<Arrow x1={316} y1={114} x2={316} y2={140} label="score all" />
+<Mem x={246} y={78} w={140} h={36} label="latent + k_rope" sub="every token, as in MLA" color="full" />
+<Arrow x1={316} y1={114} x2={316} y2={128} label="score all" />
 <Arrow x1={206} y1={146} x2={266} y2={146} />
 <Box x={266} y={128} w={100} h={36} label="scores" sub="one per cached token" />
 <Arrow x1={366} y1={146} x2={412} y2={146} label="top-k" />

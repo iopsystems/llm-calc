@@ -10,11 +10,11 @@
 <Arrow x1={52} y1={104} x2={96} y2={146} />
 <Box x={96} y={32} w={110} h={36} label="W_q" sub="H heads in G groups" />
 <Box x={96} y={78} w={110} h={36} label="W_k, W_v" sub="G KV heads" />
-<Box x={96} y={128} w={110} h={36} label="index key" sub="1 head, shared by groups" />
+<Box x={96} y={128} w={110} h={36} label="index key" sub="1 shared head" />
 <Arrow x1={206} y1={96} x2={246} y2={96} label="append" />
 <Mem x={246} y={78} w={140} h={36} label="KV cache" sub="every token, full" color="full" />
 <Arrow x1={206} y1={146} x2={246} y2={146} label="append" />
-<Mem x={246} y={128} w={140} h={36} label="index keys" sub="one per token, not TP-sharded" color="sparse" />
+<Mem x={246} y={128} w={140} h={36} label="index keys" sub="one per token, unsharded" color="sparse" />
 <Arrow x1={386} y1={146} x2={420} y2={146} label="per group" />
 <Box x={420} y={128} w={100} h={36} label="block scores" sub="B tokens per block" />
 <Arrow x1={470} y1={128} x2={470} y2={114} label="top-k blocks" />
