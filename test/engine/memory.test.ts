@@ -217,18 +217,18 @@ describe('computeMemory', () => {
   it('msa-hybrid: full KV storage, but compute attention capped at topKBlocks × blockSize on sparse layers', () => {
     // testModel base: layers=2, kvHeads=1, headDim=2, fp16; prompt+output=15.
     // msa-hybrid with 1 full + 1 sparse, blockSize=2, topKBlocks=3 → cap 6 tokens.
-    // Storage (forKv=true): both layers cache full seq → 2 × 15 × 8 = 240.
+    // Main KV: 2 × 15 × 8 = 240; sparse index keys: 1 × 15 × 2 × 2 = 60.
     const msaModel: ModelArch = {
       ...testInput.model,
       attention: {
         type: 'msa-hybrid',
         numFullLayers: 1, numSparseLayers: 1,
-        blockSize: 2, topKBlocks: 3
+        blockSize: 2, topKBlocks: 3, indexHeadDim: 2
       }
     }
     const input = { ...testInput, model: msaModel }
     const m = computeMemory(input)
-    expect(m.kvCachePerRequest).toBe(240)
+    expect(m.kvCachePerRequest).toBe(300)
     // Compute attention: 1 × 15 + 1 × min(15, 6) = 21
     expect(attendedSeqlenSummedOverLayers(msaModel, 15)).toBe(21)
     // Below the cap, sparse behaves as full: 1 × 4 + 1 × min(4, 6) = 8
@@ -241,7 +241,7 @@ describe('computeMemory', () => {
       attention: {
         type: 'msa-hybrid',
         numFullLayers: 1, numSparseLayers: 3,
-        blockSize: 2, topKBlocks: 3
+        blockSize: 2, topKBlocks: 3, indexHeadDim: 2
       }
     }
     expect(() => attendedSeqlenSummedOverLayers(badModel, 15)).toThrow(/must sum/)
@@ -253,6 +253,26 @@ describe('computeMemory', () => {
       system: {} as never,
       parallelism: Object.keys(degrees) as ('tp' | 'pp' | 'ep' | 'dp')[],
       parallelismDegrees: degrees
+    })
+
+    it.each([
+      [{ tp: 4 }, 360, 720],
+      [{ tp: 4, pp: 2 }, 180, 360],
+      [{ tp: 4, pp: 2, dp: 2, ep: 2 }, 180, 180],
+    ])('MSA replicates index keys across TP, divides across PP, and batches per DP replica: %j', (degrees, perRequest, total) => {
+      // Main KV: 2 layers × 15 tokens × 2 K/V × 4 heads × 2 dim × 2B = 960.
+      // Index: 1 sparse layer × 15 tokens × 4 dim × 2B = 120 (shared head).
+      const model: ModelArch = {
+        ...testInput.model, numKvHeads: 4,
+        attention: { type: 'msa-hybrid', numFullLayers: 1, numSparseLayers: 1,
+          blockSize: 2, topKBlocks: 3, indexHeadDim: 4 },
+      }
+      const m = computeMemory({ ...testInput, model,
+        multiDevice: md({ tp: 2 }), decodeMultiDevice: md(degrees) })
+      expect(m.kvCachePerRequest).toBe(1080)
+      expect(m.prefillSide.perRank!.kvCachePerRequest).toBe(600)
+      expect(m.decodeSide.perRank!.kvCachePerRequest).toBe(perRequest)
+      expect(m.decodeSide.perRank!.kvCacheTotal).toBe(total)
     })
 
     it('exposes kvCacheTotal = per-rank kv per request × per-replica concurrency', () => {

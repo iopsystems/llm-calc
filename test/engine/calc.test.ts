@@ -1488,13 +1488,16 @@ describe('calculate — MiniMax M3 (MSA blockwise top-k sparse) integration', ()
   const m3 = MODELS.find(m => m.id === 'minimax-m3')!
   const quant = { weights: 'fp16', kv: 'fp16', activations: 'fp16' } as const
 
-  it('KV storage at 128k is full GQA on all 60 layers — sparsity saves compute, not memory', () => {
+  it.each(['bf16', 'fp8'] as const)('KV storage at 1M includes index keys at the selected %s precision', kv => {
     const r = calculate({
-      accelerator: h100, acceleratorVariantId: 'sxm-80', model: m3, quant,
-      workload: { promptTokens: 131072, outputTokens: 0, concurrency: 1 }
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: m3, quant: { ...quant, kv },
+      workload: { promptTokens: 1048576, outputTokens: 0, concurrency: 2 }
     })
-    // 60 layers × 2(K+V) × 4 kvHeads × 128 headDim × 2B × seq
-    expect(r.memory.kvCachePerRequest).toBe(60 * 2 * 4 * 128 * 2 * 131072)
+    // BF16: 120 GiB main KV + 14.25 GiB shared index keys; FP8 halves both.
+    const expected = (kv === 'bf16' ? 134.25 : 67.125) * 2 ** 30
+    expect(r.memory.kvCachePerRequest).toBe(expected)
+    expect(r.memory.kvCacheTotal).toBe(2 * expected)
+    expect(r.perf.peak.decode.bytesPerStep).toBe(46_000_000_000 + 2 * expected)
   })
 
   it('decode FLOPs at 128k: 57 sparse layers capped at 16 blocks × 128 = 2048 tokens', () => {

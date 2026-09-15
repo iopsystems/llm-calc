@@ -404,6 +404,9 @@ export type AttentionConfig =
       numSparseLayers: number;
       blockSize: number;    // KV block granularity
       topKBlocks: number;   // blocks selected per GQA group
+      // One index-key head shared by all groups, cached per token on sparse
+      // layers. Modeled at quant.kv precision; replicated under TP, split by PP.
+      indexHeadDim: number;
     }
 
 export type ArchitectureConfig =

@@ -921,7 +921,10 @@ export const MODELS: ModelArch[] = [
     attention: {
       type: 'msa-hybrid',
       numFullLayers: 3, numSparseLayers: 57,
-      blockSize: 128, topKBlocks: 16
+      blockSize: 128, topKBlocks: 16,
+      // sparse_index_dim; one shared index-key head (MSA paper §3.1).
+      // https://huggingface.co/MiniMaxAI/MiniMax-M3/raw/main/config.json
+      indexHeadDim: 128
     },
     architecture: {
       type: 'moe',
