@@ -99,3 +99,16 @@ describe('seeding helpers', () => {
     expect(seededQuantFor('ghost')).toEqual({ weights: 'fp16', kv: 'fp16', activations: 'fp16' })
   })
 })
+
+describe('computeCompareRow on multi-GPU systems', () => {
+  it('reports fits per rank, not against a single GPU', () => {
+    // Llama 3.3 70B bf16 is ~140 GB unsharded: OOM on one H100, fine across 8.
+    const row = computeCompareRow(
+      { kind: 'sku', id: 'hgx-h100-8' },
+      { varyingId: 'llama-3.3-70b', quant: seededQuantFor('llama-3.3-70b') },
+      { promptTokens: 2048, outputTokens: 512, concurrency: 1 },
+    )
+    expect(row.ok).toBe(true)
+    if (row.ok) expect(row.metrics.fits).toBe(true)
+  })
+})

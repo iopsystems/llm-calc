@@ -82,7 +82,7 @@ export function decodeCompare(payload: string): CompareState | null {
 
 import { get } from 'svelte/store'
 import { comparePivot, compareCandidates, compareWorkload } from './stores'
-import { parseRoute } from './route'
+import { parseRoute, route } from './route'
 
 function readStoreCompareState(): CompareState {
   return { pivot: get(comparePivot), candidates: get(compareCandidates), workload: get(compareWorkload) }
@@ -105,7 +105,9 @@ export function readCompareUrlIntoStores(): void {
 }
 
 // Mirror the compare stores back to the hash while on the compare tab. Mirrors
-// share.ts.startUrlSync structure (hold `ready` until all subs wired).
+// share.ts.startUrlSync structure (hold `ready` until all subs wired). Also
+// subscribed to `route`: tab navigation writes a bare `#compare`, so without
+// this the payload would only reappear once an input changed.
 export function startCompareUrlSync(): () => void {
   if (typeof window === 'undefined') return () => {}
   let ready = false
@@ -116,7 +118,7 @@ export function startCompareUrlSync(): () => void {
     const next = `${window.location.pathname}${window.location.search}#compare?${encoded}`
     window.history.replaceState(window.history.state, '', next)
   }
-  const unsubs = [comparePivot.subscribe(write), compareCandidates.subscribe(write), compareWorkload.subscribe(write)]
+  const unsubs = [comparePivot.subscribe(write), compareCandidates.subscribe(write), compareWorkload.subscribe(write), route.subscribe(write)]
   ready = true
   write()
   return () => unsubs.forEach(u => u())

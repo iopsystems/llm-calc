@@ -92,7 +92,9 @@ export function computeCompareRow(
         tpotMs: perf.decode.timePerTokenS * 1000,
         throughputTokS: perf.decode.aggregateTokensPerS,
         kvTotalGB: result.memory.kvCacheTotal / 1e9,
-        fits: result.memory.fits,
+        // Multi-GPU systems shard weights + KV; the top-level `fits` is the
+        // unsharded total vs one device. Match Simulator/MemoryPanel.
+        fits: result.memory.perRank?.fits ?? result.memory.fits,
         regime: perf.decode.regime,
       },
     }

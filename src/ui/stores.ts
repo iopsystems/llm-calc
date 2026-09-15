@@ -6,6 +6,8 @@ import { defaultParallelism, type ParallelismConfig } from '../engine/parallelis
 import type { CalcInput, CalcResult, Dtype, MultiDeviceConfig, Quantization, Workload } from '../engine/types'
 import { computeNMax } from '../engine/queueModel'
 import { groupedDisaggFabrics } from './disaggFabrics'
+import { parseTokenCount } from './parseTokens'
+import { route } from './route'
 import {
   computeCompareRow, defaultPivotId, firstVaryingId, seededQuantFor,
   type ComparePivot, type ComparePivotKind, type CompareCandidate, type CompareRow,
@@ -408,11 +410,34 @@ export function setComparePivotKind(kind: ComparePivotKind): void {
 
 // Seed the compare view from the current calc selection so "compare this
 // against…" is one click. Always uses the SKU pivot (fixed = current
-// accelerator or system, candidate = current model). Called at startup only
-// when the URL carried no compare payload, so a shared compare link always wins.
+// accelerator or system, candidate = current model).
 export function seedCompareFromCalc(): void {
   const sku = get(systemId) || get(acceleratorId)
   const model = get(modelId)
   comparePivot.set({ kind: 'sku', id: sku })
   compareCandidates.set([{ varyingId: model, quant: seededQuantFor(model) }])
+}
+
+// Seed lazily on the first visit to the compare tab rather than at boot, so
+// the seed reflects whatever the user picked in the calculator before opening
+// Compare. Fires once; later re-entries leave a configured comparison alone.
+// Not called when the URL carried a compare payload (a shared link wins).
+export function seedCompareOnFirstEntry(): () => void {
+  let done = false
+  const unsub = route.subscribe(r => {
+    if (done || r.tab !== 'compare') return
+    done = true
+    seedCompareFromCalc()
+  })
+  return unsub
+}
+
+// Parse a workload field the same way the calculator does (positive integer,
+// optional k/m suffix). Returns false and leaves the store untouched on bad
+// input; the engine happily produces negative tok/s for a negative concurrency.
+export function setCompareWorkloadField(field: keyof Workload, raw: string): boolean {
+  const n = parseTokenCount(raw)
+  if (n === null) return false
+  compareWorkload.update(w => ({ ...w, [field]: n }))
+  return true
 }

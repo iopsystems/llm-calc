@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { encodeCompare, decodeCompare, type CompareState } from '../../src/ui/compareShare'
 import { ACCELERATORS, MODELS } from '../../src/data'
 import { SYSTEMS } from '../../src/data/systems'
@@ -79,5 +79,32 @@ describe('compare codec', () => {
 
   it('returns null when piv is missing entirely', () => {
     expect(decodeCompare('pt=1&ot=1&cc=1')).toBeNull()
+  })
+})
+
+describe('startCompareUrlSync', () => {
+  it('rewrites the compare payload when the route enters the compare tab', async () => {
+    const calls: string[] = []
+    const win = {
+      location: { hash: '#calc', pathname: '/', search: '' },
+      history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { calls.push(url); win.location.hash = url.slice(url.indexOf('#')) } },
+      addEventListener: () => {},
+    }
+    vi.stubGlobal('window', win)
+    try {
+      const { startCompareUrlSync } = await import('../../src/ui/compareShare')
+      const { route } = await import('../../src/ui/route')
+      route.set({ tab: 'calc' })
+      const stop = startCompareUrlSync()
+      expect(calls).toEqual([])
+      // Tab navigation writes a bare hash (as route.navigate does), then the
+      // hashchange handler updates the route store.
+      win.location.hash = '#compare'
+      route.set({ tab: 'compare' })
+      stop()
+      expect(calls.at(-1)).toMatch(/^\/#compare\?piv=/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ACCELERATORS, MODELS } from '../data'
   import { SYSTEMS } from '../data/systems'
-  import { comparePivot, compareCandidates, compareWorkload, setComparePivotKind } from './stores'
+  import { comparePivot, compareCandidates, compareWorkload, setComparePivotKind, setCompareWorkloadField } from './stores'
   import { firstVaryingId, seededQuantFor } from './compareModel'
   import CompareTable from './CompareTable.svelte'
 
@@ -25,6 +25,12 @@
   }
   function removeCandidate(i: number) {
     compareCandidates.update(cs => cs.filter((_, j) => j !== i))
+  }
+  // Invalid entries (negative, zero, blank) are rejected and the field snaps
+  // back to the store value; `min="1"` alone doesn't stop typed input.
+  function onWorkloadChange(field: 'promptTokens' | 'outputTokens' | 'concurrency', e: Event) {
+    const el = e.currentTarget as HTMLInputElement
+    if (!setCompareWorkloadField(field, el.value)) el.value = String($compareWorkload[field])
   }
 </script>
 
@@ -50,9 +56,9 @@
   </div>
 
   <div class="row workload">
-    <label>Prompt <input type="number" min="1" value={$compareWorkload.promptTokens} onchange={e => compareWorkload.update(w => ({ ...w, promptTokens: +(e.currentTarget as HTMLInputElement).value }))} /></label>
-    <label>Output <input type="number" min="1" value={$compareWorkload.outputTokens} onchange={e => compareWorkload.update(w => ({ ...w, outputTokens: +(e.currentTarget as HTMLInputElement).value }))} /></label>
-    <label>Concurrency <input type="number" min="1" value={$compareWorkload.concurrency} onchange={e => compareWorkload.update(w => ({ ...w, concurrency: +(e.currentTarget as HTMLInputElement).value }))} /></label>
+    <label>Prompt <input type="number" min="1" value={$compareWorkload.promptTokens} onchange={e => onWorkloadChange('promptTokens', e)} /></label>
+    <label>Output <input type="number" min="1" value={$compareWorkload.outputTokens} onchange={e => onWorkloadChange('outputTokens', e)} /></label>
+    <label>Concurrency <input type="number" min="1" value={$compareWorkload.concurrency} onchange={e => onWorkloadChange('concurrency', e)} /></label>
   </div>
 
   <div class="candidates">
