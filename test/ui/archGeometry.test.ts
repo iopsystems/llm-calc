@@ -67,3 +67,59 @@ describe('lanesFor — KV-cached variants', () => {
     }
   })
 })
+
+describe('lanesFor — latent and sparse variants', () => {
+  it('mla: one latent lane, bytes = (kvLoraRank + qkRopeHeadDim) × 2', () => {
+    const lanes = lanesFor(byId('deepseek-v3'))
+    expect(lanes).toHaveLength(1)
+    expect(lanes[0]).toMatchObject({
+      kind: 'mla', color: 'full', count: 61,
+      cache: { glyph: 'latent', bytesPerToken: (512 + 64) * 2, fixedBytes: 0 },
+      reach: { glyph: 'all' },
+    })
+    expect(lanes[0].cache.label).toBe('latent 512 + RoPE key 64 · 1.1 KiB')
+  })
+
+  it('mla-dsa: same cache as mla, reach is top-k tokens', () => {
+    const lanes = lanesFor(byId('deepseek-v3.2'))
+    expect(lanes).toHaveLength(1)
+    expect(lanes[0]).toMatchObject({
+      kind: 'dsa', color: 'sparse', count: 61,
+      cache: { glyph: 'latent', bytesPerToken: (512 + 64) * 2 },
+      reach: { glyph: 'topk', tokens: 2048, label: 'top-2048 tokens' },
+    })
+  })
+
+  it('msa-hybrid: full lane, then sparse lane whose cache adds the shared index key', () => {
+    const lanes = lanesFor(byId('minimax-m3'))
+    expect(lanes.map(l => [l.kind, l.count])).toEqual([['full', 3], ['msa', 57]])
+    expect(lanes[1]).toMatchObject({
+      color: 'sparse',
+      cache: { glyph: 'kvidx', bytesPerToken: 2048 + 128 * 2 },
+      reach: { glyph: 'topk', tokens: 16 * 128, label: '16 blocks × 128 tokens' },
+    })
+    expect(lanes[1].cache.label).toBe('K + V 2 KiB + shared index key 128 · 256 B')
+  })
+
+  it('csa-hca-hybrid (V4-Flash): window, CSA ÷4 with top-k, HCA ÷128 compressed', () => {
+    const lanes = lanesFor(byId('deepseek-v4-flash'))
+    expect(lanes.map(l => [l.kind, l.count])).toEqual([['window', 2], ['csa', 21], ['hca', 20]])
+    expect(lanes[0].reach).toMatchObject({ glyph: 'window', tokens: 128 })
+    expect(lanes[1]).toMatchObject({
+      color: 'sparse',
+      cache: { glyph: 'kvcomp', ratio: 4, bytesPerToken: 2048 / 4 },
+      reach: { glyph: 'topk', tokens: 512 * 4, local: 128 },
+    })
+    expect(lanes[1].cache.label).toBe('K + V 2 KiB per 4 tokens · 512 B/token')
+    expect(lanes[1].reach.label).toBe('top-512 of the 1 : 4 stream + 128 local')
+    expect(lanes[2]).toMatchObject({
+      cache: { glyph: 'kvcomp', ratio: 128, bytesPerToken: 2048 / 128 },
+      reach: { glyph: 'compress', ratio: 128, local: 128, label: 'all of the 1 : 128 stream + 128 local' },
+    })
+  })
+
+  it('csa-hca-hybrid (V4-Pro): no sliding lane when numSlidingLayers is 0', () => {
+    const lanes = lanesFor(byId('deepseek-v4-pro'))
+    expect(lanes.map(l => [l.kind, l.count])).toEqual([['csa', 30], ['hca', 31]])
+  })
+})

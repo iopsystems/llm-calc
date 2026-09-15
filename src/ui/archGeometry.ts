@@ -2,6 +2,7 @@
 // from src/engine/memory.ts so the drawing cannot disagree with the calc.
 import type { ModelArch } from '../engine/types'
 import { kvBytesPerTokenPerLayer } from '../engine/memory'
+import { bytesOf } from '../engine/dtypes'
 import { KV_REF_DTYPE } from './catalogMetrics'
 import type { LaneColor, CacheGlyph, ReachGlyph } from './figure/types'
 
@@ -68,6 +69,12 @@ const ALL_REACH: Lane['reach'] = { glyph: 'all', label: 'all tokens' }
 const NONE_REACH: Lane['reach'] = { glyph: 'none', label: 'no attention' }
 const windowReach = (w: number): Lane['reach'] => ({ glyph: 'window', tokens: w, label: `trailing ${w}` })
 
+function latentCache(rank: number, rope: number, p: number): Lane['cache'] {
+  return { glyph: 'latent', bytesPerToken: p, fixedBytes: 0, label: `latent ${rank} + RoPE key ${rope} · ${fmtBytes(p)}` }
+}
+const topkReach = (tokens: number, label: string, local?: number): Lane['reach'] =>
+  ({ glyph: 'topk', tokens, label, ...(local === undefined ? {} : { local }) })
+
 export function lanesFor(m: ModelArch): Lane[] {
   const att = m.attention
   const p = kvBytesPerTokenPerLayer(m, KV_REF_DTYPE)
@@ -86,6 +93,37 @@ export function lanesFor(m: ModelArch): Lane[] {
         lane('full', att.numFullLayers, kvCache(m, p), ALL_REACH),
         lane('pruned', m.layers - att.numFullLayers, NONE_CACHE, NONE_REACH),
       ]
+    case 'mla':
+      return [lane('mla', m.layers, latentCache(att.kvLoraRank, att.qkRopeHeadDim, p), ALL_REACH)]
+    case 'mla-dsa':
+      return [lane('dsa', m.layers, latentCache(att.kvLoraRank, att.qkRopeHeadDim, p),
+        topkReach(att.topK, `top-${att.topK} tokens`))]
+    case 'msa-hybrid': {
+      const idx = att.indexHeadDim * bytesOf(KV_REF_DTYPE)
+      return [
+        lane('full', att.numFullLayers, kvCache(m, p), ALL_REACH),
+        lane('msa', att.numSparseLayers, {
+          glyph: 'kvidx', bytesPerToken: p + idx, fixedBytes: 0,
+          label: `K + V ${fmtBytes(p)} + shared index key ${att.indexHeadDim} · ${fmtBytes(idx)}`,
+        }, topkReach(att.topKBlocks * att.blockSize, `${att.topKBlocks} blocks × ${att.blockSize} tokens`)),
+      ]
+    }
+    case 'csa-hca-hybrid': {
+      const comp = (M: number): Lane['cache'] => ({
+        glyph: 'kvcomp', ratio: M, bytesPerToken: p / M, fixedBytes: 0,
+        label: `K + V ${fmtBytes(p)} per ${M} tokens · ${fmtBytes(p / M)}/token`,
+      })
+      const w = att.slidingWindow
+      const lanes: Lane[] = []
+      if (att.numSlidingLayers > 0) lanes.push(lane('window', att.numSlidingLayers, kvCache(m, p), windowReach(w)))
+      lanes.push(lane('csa', att.numCsaLayers, comp(att.csaCompressionM),
+        topkReach(att.csaTopK * att.csaCompressionM, `top-${att.csaTopK} of the 1 : ${att.csaCompressionM} stream + ${w} local`, w)))
+      lanes.push(lane('hca', att.numHcaLayers, comp(att.hcaCompressionM), {
+        glyph: 'compress', ratio: att.hcaCompressionM, local: w,
+        label: `all of the 1 : ${att.hcaCompressionM} stream + ${w} local`,
+      }))
+      return lanes
+    }
     default:
       // Remaining variants land in Tasks 4 and 5; the never-check arrives with the last one.
       throw new Error(`lanesFor: variant not yet handled: ${att.type}`)
