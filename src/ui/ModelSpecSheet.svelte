@@ -2,8 +2,11 @@
 <script lang="ts">
   import type { ModelArch } from '../engine/types'
   import { modelMetrics } from './catalogMetrics'
+  import ArchGeometry from './ArchGeometry.svelte'
+  import { geometryModel } from './archGeometry'
   export let model: ModelArch
   $: m = modelMetrics(model)
+  $: geo = geometryModel(model)
   $: arch = model.architecture
   function kb(bytes: number): string {
     return bytes >= 1024 ? `${(bytes / 1024).toFixed(2)} KB` : `${bytes} B`
@@ -34,6 +37,14 @@
     <dt>Native precision</dt><dd>{model.nativeDtype}</dd>
     <dt>Multi-token prediction</dt><dd>{m.mtpLabel}</dd>
   </dl>
+
+  <div class="rule"></div>
+  <h3>Architecture <span class="ref">(fp16 KV reference, reach at max context)</span></h3>
+  <div class="figure"><ArchGeometry geometry={geo} /></div>
+  <p class="caption">
+    {geo.caption}
+    <a href={`#info/arch/${geo.schematicId}`}>How {m.attentionLabel} works</a>
+  </p>
 
   <div class="rule"></div>
   <h3>Scale</h3>
@@ -99,4 +110,7 @@
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
   dt { color: #555; }
   dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .figure { overflow-x: auto; margin: 0.4rem 0; }
+  .caption { margin: 0.2rem 0 0; font-size: 0.85rem; color: #555; }
+  .caption a { color: #1a4f8a; }
 </style>
