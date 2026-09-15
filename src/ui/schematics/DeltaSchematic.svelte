@@ -19,5 +19,5 @@
   <rect x={60 + i * 50} y={134} width="46" height="18" rx="2" fill={KIND_COLORS[k]} />
   <text x={83 + i * 50} y={147} font-size="9.5" text-anchor="middle" fill="#fff" font-weight="600">{k === 'full' ? 'attn' : 'ΔNet'}</text>
 {/each}
-<Mem x={280} y={130} w={240} h={26} label="gated attention KV cache · partial RoPE · grows" color="full" />
+<Mem x={280} y={130} w={240} h={26} label="gated attention KV cache · grows" color="full" />
 <text x="8" y="186" font-size="10" fill="#555">Three of four layers hold a fixed state; the attention layers keep a small GQA cache that grows with context.</text>
