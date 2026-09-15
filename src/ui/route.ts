@@ -8,7 +8,7 @@ export type Route =
   | { tab: 'sim' }
   | { tab: 'compare' }
   | { tab: 'info' }
-  | { tab: 'info'; detail: { kind: 'model' | 'sku'; id: string } }
+  | { tab: 'info'; detail: { kind: 'model' | 'sku' | 'arch'; id: string } }
 
 // Parse a raw location.hash (with or without leading '#') into a Route.
 // Anything unrecognized falls back to the calculator.
@@ -18,8 +18,8 @@ export function parseRoute(hash: string): Route {
   if (h === 'sim'  || h.startsWith('sim?'))  return { tab: 'sim' }
   if (h === 'compare' || h.startsWith('compare?')) return { tab: 'compare' }
   if (h === 'info') return { tab: 'info' }
-  const m = h.match(/^info\/(model|sku)\/(.+)$/)
-  if (m) return { tab: 'info', detail: { kind: m[1] as 'model' | 'sku', id: m[2] } }
+  const m = h.match(/^info\/(model|sku|arch)\/(.+)$/)
+  if (m) return { tab: 'info', detail: { kind: m[1] as 'model' | 'sku' | 'arch', id: m[2] } }
   return { tab: 'calc' }
 }
 
