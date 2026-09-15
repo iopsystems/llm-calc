@@ -247,3 +247,16 @@ describe('geometryModel', () => {
     }
   })
 })
+
+describe('lane text fits the figure', () => {
+  // Panel 3 draws the text line at x=110 in a 640px viewBox: 516px of room,
+  // ~5.6px per character at 10.5px type.
+  it('every lane text line is at most 90 characters', () => {
+    for (const m of MODELS) {
+      for (const l of lanesFor(m)) {
+        const line = `${l.label} × ${l.count}: ${l.cache.label}`
+        expect(line.length, `${m.id}: ${line}`).toBeLessThanOrEqual(90)
+      }
+    }
+  })
+})

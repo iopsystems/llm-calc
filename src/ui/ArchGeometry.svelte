@@ -11,7 +11,9 @@
 
   const W = 640, LX = 14, BX = 110, BW = W - BX - 14
   const CACHE_SCALE = 8192   // bytes per full bar width; longer bars clip with the value printed
-  const ROW = 24
+  const ROW = 34             // two lines per lane: label, then glyph + bar
+  const BAR_X = BX + 48      // clear of the 40px cache glyph
+  const BAR_W = BW - 48
 
   $: g = geometry
   $: S = g.maxContext
@@ -62,7 +64,7 @@
         {/each}
       {/each}
       <text x={BX} y={hy + 26} class="txt">
-        {h.numHeads} query heads on {h.numKvHeads} KV heads · {h.numHeads / h.numKvHeads} : 1 · head dim {h.headDim}{#if h.numKvHeads > 8} · first 8 groups drawn{/if}
+        {h.numHeads} query heads on {h.numKvHeads} KV heads · {h.numHeads / h.numKvHeads} : 1 · head dim {h.headDim}{#if h.numKvHeads > 8}{' '}· first 8 groups drawn{/if}
       </text>
     {:else if h.kind === 'latent'}
       {@const scale = 300 / (h.fullKvWidth ?? 1)}
@@ -87,18 +89,17 @@
   <text x={BX + BW} y={y3 + 12} class="lbl" text-anchor="end">bar = {fmtBytes(CACHE_SCALE)} per layer</text>
   {#each g.lanes as l, i}
     {@const ry = y3 + 18 + i * ROW}
-    {@const bw = Math.min(BW, BW * l.cache.bytesPerToken / CACHE_SCALE)}
+    {@const bw = Math.min(BAR_W, BAR_W * l.cache.bytesPerToken / CACHE_SCALE)}
     <rect x={BX - 8} y={ry + 2} width="5" height="12" fill={KIND_COLORS[l.color]} />
-    {#if l.cache.glyph === 'state' || l.cache.glyph === 'none'}
-      <CacheGlyph glyph={l.cache.glyph} color={KIND_COLORS[l.color]} x={BX} y={ry} w={40} />
-    {:else}
-      <rect x={BX} y={ry + 3} width={Math.max(2, bw)} height="10" fill={KIND_COLORS[l.color]} />
+    <text x={BX} y={ry + 10} class="txt">{l.label} × {l.count}: {l.cache.label}</text>
+    <CacheGlyph glyph={l.cache.glyph} color={KIND_COLORS[l.color]} x={BX} y={ry + 14} w={40} ratio={l.cache.ratio} />
+    {#if l.cache.glyph !== 'state' && l.cache.glyph !== 'none'}
+      <rect x={BAR_X} y={ry + 17} width={Math.max(2, bw)} height="10" fill={KIND_COLORS[l.color]} />
     {/if}
-    <text x={BX + Math.max(48, bw) + 8} y={ry + 12} class="txt">{l.label} × {l.count}: {l.cache.label}</text>
   {/each}
 
   <!-- Panel 4: reach at trained context -->
-  <text x={LX} y={y4 + 12} class="lbl">READS AT DECODE</text>
+  <text x={LX} y={y4 + 12} class="lbl">DECODE READ</text>
   {#each g.lanes as l, i}
     {@const ry = y4 + 18 + i * 36}
     <text x={BX} y={ry - 2} class="txt">{l.label}: {l.reach.label}</text>
@@ -120,7 +121,7 @@
       <rect x={BX + si * 22} y={y5 + 38} width="18" height="8" rx="1" fill={EXPERT_COLOR} opacity="0.55" />
     {/each}
     <text x={BX} y={y5 + 60} class="txt">
-      {g.ffn.routed} routed experts · {g.ffn.active} active{#if g.ffn.shared} + {g.ffn.shared} shared, always on{/if} · {(g.ffn.activeRatio * 100).toFixed(1)}% of parameters active per token
+      {g.ffn.routed} routed experts · {g.ffn.active} active{#if g.ffn.shared}{' '}+ {g.ffn.shared} shared, always on{/if} · {(g.ffn.activeRatio * 100).toFixed(1)}% of parameters active per token
     </text>
   {/if}
 </svg>
