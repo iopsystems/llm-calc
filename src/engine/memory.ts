@@ -105,6 +105,17 @@ export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number,
     // NAS-pruned blocks have no attention at all.
     return att.numFullLayers * seqlen
   }
+  if (att.type === 'msa-hybrid') {
+    if (att.numFullLayers + att.numSparseLayers !== model.layers) {
+      throw new Error(
+        `msa-hybrid layer counts must sum to model.layers: ` +
+        `${att.numFullLayers} + ${att.numSparseLayers} ≠ ${model.layers}`
+      )
+    }
+    // Sparse layers cache full KV; top-k block selection only caps compute.
+    const sparseCount = forKv ? seqlen : Math.min(seqlen, att.topKBlocks * att.blockSize)
+    return att.numFullLayers * seqlen + att.numSparseLayers * sparseCount
+  }
   if (att.type === 'mla-dsa') return model.layers * (forKv ? seqlen : Math.min(seqlen, att.topK))
   const perLayer = att.type === 'sliding' ? Math.min(seqlen, att.window) : seqlen
   return model.layers * perLayer
@@ -174,8 +185,14 @@ export function computeMemory(input: CalcInput): MemoryResult {
   const weights = model.paramCount * bytesOf(quant.weights)
   const kvPerLayerPerToken = kvBytesPerTokenPerLayer(model, quant.kv)
   const attendedSeqlen = attendedSeqlenSummedOverLayers(model, seqlen, true)
+  // MSA retains separate index keys as well as the main GQA cache. The
+  // calculator uses the selected KV precision for both caches.
+  const indexKvPerRequest = model.attention.type === 'msa-hybrid'
+    ? model.attention.numSparseLayers * seqlen * model.attention.indexHeadDim * bytesOf(quant.kv)
+    : 0
   const kvCachePerRequest =
     kvPerLayerPerToken * attendedSeqlen
+    + indexKvPerRequest
     + linearAttentionStateBytes(model, quant.kv)
     + deltaStateBytes(model, quant.kv)
     + mambaStateBytes(model)
@@ -200,12 +217,12 @@ export function computeMemory(input: CalcInput): MemoryResult {
   const prefillSide = buildSide(
     weights, kvCacheTotal, activationsPeak,
     prefillVariant.hbmCapacityGB,
-    input.multiDevice, model, workload, kvCachePerRequest
+    input.multiDevice, model, workload, kvCachePerRequest, indexKvPerRequest
   )
   const decodeSide = buildSide(
     weights, kvCacheTotal, decodeActivationsPeak,
     decodeVariant.hbmCapacityGB,
-    input.decodeMultiDevice ?? input.multiDevice, model, workload, kvCachePerRequest
+    input.decodeMultiDevice ?? input.multiDevice, model, workload, kvCachePerRequest, indexKvPerRequest
   )
 
   return {
@@ -244,6 +261,7 @@ function buildSide(
   model: ModelArch,
   workload: Workload,
   kvCachePerRequest: number,
+  indexKvPerRequest: number,
 ): MemorySide {
   const total = weights + kvCacheTotal + activations
   const hbmCapacityBytes = hbmCapacityGB * BYTES_PER_GB
@@ -259,7 +277,11 @@ function buildSide(
     )
     const rankWeights = weights / divisors.weights
     const perReplicaConcurrency = workload.concurrency / divisors.replicas
-    const rankKvPerRequest = kvCachePerRequest / divisors.kv
+    // The index key is shared by every GQA group, so TP cannot shard it.
+    // PP divides its layers using the same uniform-stage approximation as KV.
+    const pp = multiDevice.parallelism.includes('pp') ? (multiDevice.parallelismDegrees.pp ?? 1) : 1
+    const rankKvPerRequest = (kvCachePerRequest - indexKvPerRequest) / divisors.kv
+      + indexKvPerRequest / pp
     const rankKvTotal = rankKvPerRequest * perReplicaConcurrency
     const rankActivations = activations / divisors.activations
     const rankTotal = rankWeights + rankKvTotal + rankActivations

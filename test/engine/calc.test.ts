@@ -1483,6 +1483,45 @@ describe('calculate — 2026-H2 additions (Kimi K3, Qwen3.8, GLM-5.3)', () => {
   })
 })
 
+describe('calculate — MiniMax M3 (MSA blockwise top-k sparse) integration', () => {
+  const h100 = ACCELERATORS.find(a => a.id === 'h100')!
+  const m3 = MODELS.find(m => m.id === 'minimax-m3')!
+  const quant = { weights: 'fp16', kv: 'fp16', activations: 'fp16' } as const
+
+  it.each(['bf16', 'fp8'] as const)('KV storage at 1M includes index keys at the selected %s precision', kv => {
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: m3, quant: { ...quant, kv },
+      workload: { promptTokens: 1048576, outputTokens: 0, concurrency: 2 }
+    })
+    // BF16: 120 GiB main KV + 14.25 GiB shared index keys; FP8 halves both.
+    const expected = (kv === 'bf16' ? 134.25 : 67.125) * 2 ** 30
+    expect(r.memory.kvCachePerRequest).toBe(expected)
+    expect(r.memory.kvCacheTotal).toBe(2 * expected)
+    expect(r.perf.peak.decode.bytesPerStep).toBe(46_000_000_000 + 2 * expected)
+  })
+
+  it('decode FLOPs at 128k: 57 sparse layers capped at 16 blocks × 128 = 2048 tokens', () => {
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: m3, quant,
+      workload: { promptTokens: 131072, outputTokens: 0, concurrency: 1 }
+    })
+    const attended = 3 * 131072 + 57 * 2048
+    const attnDim = 64 * 128
+    expect(r.perf['peak'].decode.flopsPerStep)
+      .toBe(2 * 23_000_000_000 + 2 * attended * attnDim)
+    // vs hypothetical all-full 60 × 131072: attention FLOPs cut > 15×
+    expect((60 * 131072) / attended).toBeGreaterThan(15)
+  })
+
+  it('catalog fields: 428B/A23B bf16, 1M ctx, MTP modules 7 per config', () => {
+    expect(m3.paramCount).toBe(428_000_000_000)
+    expect(m3.architecture.type === 'moe' && m3.architecture.activeParamCount).toBe(23_000_000_000)
+    expect(m3.nativeDtype).toBe('bf16')
+    expect(m3.maxContext).toBe(1048576)
+    expect(m3.numNextnLayers).toBe(7)
+  })
+})
+
 describe('models data — every entry produces finite results', () => {
   const h100 = ACCELERATORS.find(a => a.id === 'h100')!
 

@@ -20,6 +20,7 @@ function attentionLabel(m: ModelArch): string {
     case 'csa-hca-hybrid': return 'Compressed sparse + heavily-compressed attention'
     case 'delta-hybrid': return 'Gated DeltaNet + gated attention hybrid'
     case 'mamba2-hybrid': return 'Mamba2 SSM + attention hybrid'
+    case 'msa-hybrid': return 'Blockwise top-k sparse attention (MSA)'
     case 'partial': return `Partial attention (${m.attention.numFullLayers}/${m.layers} blocks, NAS-pruned)`
     default: {
       const _exhaustive: never = m.attention

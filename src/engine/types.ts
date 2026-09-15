@@ -392,6 +392,22 @@ export type AttentionConfig =
       // Uses model.numKvHeads and model.headDim for KV cache computation
       ropeDim: number;            // RoPE embedding dimension
     }
+  | { type: 'msa-hybrid';
+      // MiniMax Sparse Attention (MiniMax M3, arXiv 2606.13392): full-GQA
+      // layers interleaved with blockwise top-k sparse GQA. An index branch
+      // scores KV blocks per GQA group; the main branch attends only the
+      // selected blocks. All layers cache full KV — sparsity limits compute,
+      // not storage. Same simplifications as mla-dsa: decode HBM reads use
+      // the full cache and the index branch's scoring cost is not modeled.
+      // Per-layer counts (must sum to model.layers)
+      numFullLayers: number;
+      numSparseLayers: number;
+      blockSize: number;    // KV block granularity
+      topKBlocks: number;   // blocks selected per GQA group
+      // One index-key head shared by all groups, cached per token on sparse
+      // layers. Modeled at quant.kv precision; replicated under TP, split by PP.
+      indexHeadDim: number;
+    }
 
 export type ArchitectureConfig =
   | { type: 'dense' }

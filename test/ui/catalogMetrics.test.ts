@@ -23,6 +23,10 @@ describe('modelMetrics', () => {
     expect(r.moeActiveRatio).toBeGreaterThan(0)
     expect(r.moeActiveRatio).toBeLessThan(1)
   })
+  it('MSA model gets a blockwise sparse label', () => {
+    const m = MODELS.find(x => x.id === 'minimax-m3')!
+    expect(modelMetrics(m).attentionLabel).toMatch(/blockwise top-k sparse/i)
+  })
   it('dense model has no moeActiveRatio', () => {
     const m = MODELS.find(x => x.id === 'llama-3.3-70b')!
     expect(modelMetrics(m).moeActiveRatio).toBeUndefined()
