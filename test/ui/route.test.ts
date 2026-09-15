@@ -29,6 +29,14 @@ describe('parseRoute', () => {
   it('sim with payload', () => {
     expect(parseRoute('#sim?a=h100&m=llama-3.3-70b')).toEqual({ tab: 'sim' })
   })
+  it('info arch detail', () => {
+    expect(parseRoute('#info/arch/mla'))
+      .toEqual({ tab: 'info', detail: { kind: 'arch', id: 'mla' } })
+  })
+  it('info arch detail with hyphenated id', () => {
+    expect(parseRoute('#info/arch/csa-hca-hybrid'))
+      .toEqual({ tab: 'info', detail: { kind: 'arch', id: 'csa-hca-hybrid' } })
+  })
 })
 
 describe('serializeRoute', () => {
@@ -47,6 +55,11 @@ describe('serializeRoute', () => {
   })
   it('sim with payload', () => {
     expect(serializeRoute({ tab: 'sim' }, 'a=h100')).toBe('#sim?a=h100')
+  })
+  it('info arch detail round-trips', () => {
+    const r: Route = { tab: 'info', detail: { kind: 'arch', id: 'delta-hybrid' } }
+    expect(serializeRoute(r)).toBe('#info/arch/delta-hybrid')
+    expect(parseRoute(serializeRoute(r))).toEqual(r)
   })
 })
 

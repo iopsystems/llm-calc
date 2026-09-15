@@ -7,6 +7,8 @@
   import { modelId, acceleratorId, systemId } from './stores'
   import ModelSpecSheet from './ModelSpecSheet.svelte'
   import SkuSpecSheet from './SkuSpecSheet.svelte'
+  import ArchPage from './ArchPage.svelte'
+  import { SCHEMATIC_GROUPS, schematicFor } from './schematics/meta'
 
   // Pin Moonshot AI to the head so CSS-column auto-flow lands it in the
   // leftmost column of the browse grid.
@@ -19,7 +21,7 @@
   // input panels keep their own consumer-GPU toggles).
   const skuGroups = orderSkus(ACCELERATORS, SYSTEMS)
 
-  let section: 'models' | 'skus' = 'models'
+  let section: 'models' | 'skus' | 'archs' = 'models'
   let cardOpen = true
 
   // Route detail (deep link / click) takes precedence; otherwise the card
@@ -33,10 +35,13 @@
   $: activeSku = (routeDetail?.kind === 'sku'
     ? (ACCELERATORS.find(a => a.id === routeDetail.id) ?? SYSTEMS.find(s => s.id === routeDetail.id))
     : undefined) ?? pinnedSku
+  $: activeArch = routeDetail?.kind === 'arch' ? schematicFor(routeDetail.id) : undefined
   // A detail route forces its section; otherwise the manual toggle wins.
-  $: effSection = routeDetail ? (routeDetail.kind === 'model' ? 'models' : 'skus') : section
+  $: effSection = routeDetail
+    ? (routeDetail.kind === 'model' ? 'models' : routeDetail.kind === 'sku' ? 'skus' : 'archs')
+    : section
 
-  function selectSection(s: 'models' | 'skus') {
+  function selectSection(s: 'models' | 'skus' | 'archs') {
     section = s
     navigate({ tab: 'info' })  // clear any detail so the toggle takes effect
   }
@@ -61,6 +66,7 @@
   <div class="subtabs">
     <button class:active={effSection === 'models'} on:click={() => selectSection('models')}>Models</button>
     <button class:active={effSection === 'skus'} on:click={() => selectSection('skus')}>SKUs</button>
+    <button class:active={effSection === 'archs'} on:click={() => selectSection('archs')}>Architectures</button>
   </div>
 
   {#if effSection === 'models'}
@@ -97,7 +103,7 @@
         </div>
       {/each}
     </div>
-  {:else}
+  {:else if effSection === 'skus'}
     {#if activeSku}
       <div class="cardwrap">
         {#if cardOpen}
@@ -132,6 +138,43 @@
               </ul>
             </div>
           {/each}
+        </div>
+      {/each}
+    </div>
+  {:else}
+    {#if activeArch}
+      <div class="cardwrap">
+        {#if cardOpen}
+          <ArchPage meta={activeArch}>
+            <button class="cardtoggle" title="Collapse" aria-label="Collapse"
+              aria-expanded="true" on:click={() => cardOpen = false}>−</button>
+          </ArchPage>
+        {:else}
+          <div class="collapsed">
+            <button class="cardtoggle" title="Expand" aria-label="Expand"
+              aria-expanded="false" on:click={() => cardOpen = true}>+</button>
+            {activeArch.title}
+          </div>
+        {/if}
+      </div>
+    {/if}
+    <div class="groups">
+      {#each SCHEMATIC_GROUPS as g}
+        <div class="group">
+          <h3>{g.title}</h3>
+          <ul>
+            {#each g.ids as id}
+              {@const s = schematicFor(id)}
+              {#if s}
+                <li>
+                  <button class="entry" class:pinned={id === activeArch?.id}
+                    on:click={() => navigate({ tab: 'info', detail: { kind: 'arch', id } })}>
+                    {s.title}
+                  </button>
+                </li>
+              {/if}
+            {/each}
+          </ul>
         </div>
       {/each}
     </div>

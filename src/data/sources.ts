@@ -67,6 +67,68 @@ export const SOURCES = {
   'google-tpu-v6e-docs': {
     title: 'Google Cloud — TPU v6e (Trillium) system architecture',
     url: 'https://cloud.google.com/tpu/docs/v6e'
+  },
+  // Architecture papers (schematic citations)
+  'arxiv-2305-13245': {
+    title: 'GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints',
+    url: 'https://arxiv.org/abs/2305.13245'
+  },
+  'arxiv-2310-06825': {
+    title: 'Mistral 7B',
+    url: 'https://arxiv.org/abs/2310.06825'
+  },
+  'arxiv-2002-05202': {
+    title: 'GLU Variants Improve Transformer',
+    url: 'https://arxiv.org/abs/2002.05202'
+  },
+  'arxiv-2503-19786': {
+    title: 'Gemma 3 Technical Report',
+    url: 'https://arxiv.org/abs/2503.19786'
+  },
+  'arxiv-2411-19146': {
+    title: 'Puzzle: Distillation-Based NAS for Inference-Optimized LLMs',
+    url: 'https://arxiv.org/abs/2411.19146'
+  },
+  'arxiv-2405-04434': {
+    title: 'DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model',
+    url: 'https://arxiv.org/abs/2405.04434'
+  },
+  // No arXiv listing for the DSA report; the official repo carries it.
+  'deepseek-v3-2-exp': {
+    title: 'DeepSeek-V3.2-Exp: Boosting Long-Context Efficiency with DeepSeek Sparse Attention',
+    url: 'https://github.com/deepseek-ai/DeepSeek-V3.2-Exp'
+  },
+  'arxiv-2606-13392': {
+    title: 'MiniMax Sparse Attention',
+    url: 'https://arxiv.org/abs/2606.13392'
+  },
+  'deepseek-v4-report': {
+    title: 'DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence',
+    url: 'https://arxiv.org/abs/2606.19348'
+  },
+  'arxiv-2510-26692': {
+    title: 'Kimi Linear: An Expressive, Efficient Attention Architecture',
+    url: 'https://arxiv.org/abs/2510.26692'
+  },
+  'arxiv-2412-06464': {
+    title: 'Gated Delta Networks: Improving Mamba2 with Delta Rule',
+    url: 'https://arxiv.org/abs/2412.06464'
+  },
+  'arxiv-2405-21060': {
+    title: 'Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality',
+    url: 'https://arxiv.org/abs/2405.21060'
+  },
+  'arxiv-2504-03624': {
+    title: 'Nemotron-H: A Family of Accurate and Efficient Hybrid Mamba-Transformer Models',
+    url: 'https://arxiv.org/abs/2504.03624'
+  },
+  'arxiv-2101-03961': {
+    title: 'Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity',
+    url: 'https://arxiv.org/abs/2101.03961'
+  },
+  'arxiv-2401-06066': {
+    title: 'DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models',
+    url: 'https://arxiv.org/abs/2401.06066'
   }
 } as const satisfies Record<string, Source>
 

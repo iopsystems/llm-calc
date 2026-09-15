@@ -52,6 +52,40 @@ describe('modelMetrics', () => {
       else expect(label).toBe('No')
     }
   })
+  it('hybrid model: KV per token counts only caching layers (Qwen3.5-397B → 15 × 2 KiB)', () => {
+    const m = MODELS.find(x => x.id === 'qwen3.5-397b-a17b')!
+    const r = modelMetrics(m)
+    // 45 DeltaNet layers cache nothing; 15 gated-attention layers × 2 KV heads × 256 × 2 B.
+    expect(r.kvBytesPerToken).toBe(15 * 2048)
+  })
+  it('MSA model: KV per token includes the per-sparse-layer index key', () => {
+    const m = MODELS.find(x => x.id === 'minimax-m3')!
+    // 60 layers × 2 KiB main cache + 57 sparse layers × 128 × 2 B index key.
+    expect(modelMetrics(m).kvBytesPerToken).toBe(60 * 2048 + 57 * 128 * 2)
+  })
+  it('sliding model: KV per token at max context is the window share', () => {
+    const m = MODELS.find(x => x.id === 'mistral-7b-v0.1')!
+    // 32 layers × 4 KiB × (4096 window / 32768 max context).
+    expect(modelMetrics(m).kvBytesPerToken).toBeCloseTo(32 * 4096 * 4096 / 32768, 6)
+  })
+  it('fixedStateBytes: Mamba2 state is fp32 regardless of KV reference', () => {
+    const m = MODELS.find(x => x.id === 'nemotron-3-nano-30b-a3b')!
+    expect(modelMetrics(m).fixedStateBytes).toBe(23 * 64 * 64 * 128 * 4)
+  })
+  it('fixedStateBytes: DeltaNet state at fp16', () => {
+    const m = MODELS.find(x => x.id === 'qwen3.5-397b-a17b')!
+    expect(modelMetrics(m).fixedStateBytes).toBe(45 * 64 * 128 * 128 * 2)
+  })
+  it('fixedStateBytes is zero for a full-attention model', () => {
+    const m = MODELS.find(x => x.id === 'llama-3.3-70b')!
+    expect(modelMetrics(m).fixedStateBytes).toBe(0)
+  })
+  it('attentionReachLayers: MLA reaches every layer, DSA reaches topK/S of each', () => {
+    const v3 = MODELS.find(x => x.id === 'deepseek-v3')!
+    const v32 = MODELS.find(x => x.id === 'deepseek-v3.2')!
+    expect(modelMetrics(v3).attentionReachLayers).toBe(61)
+    expect(modelMetrics(v32).attentionReachLayers).toBeCloseTo(2048 * 61 / 163840, 6)
+  })
 })
 
 describe('skuMetrics', () => {

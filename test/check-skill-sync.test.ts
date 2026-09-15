@@ -8,6 +8,7 @@ import {
   extractSkillAttentionVariants,
   extractSkillArchitectureVariants,
   extractSkillModelArchFields,
+  extractSkillFigureVariants,
   // @ts-expect-error — plain .mjs, no .d.ts
 } from '../.claude/hooks/check-skill-sync.mjs'
 
@@ -85,6 +86,23 @@ Otherwise: \`architecture: { type: 'dense' }\`.
   })
 })
 
+describe('extractSkillFigureVariants', () => {
+  it('parses bullet list of **`name`** items in the Figures section', () => {
+    const md = `
+## Figures
+
+- **\`full\`** — lanes: full × layers · FullSchematic
+- **\`mla-dsa\`** — lanes: dsa × layers · MlaDsaSchematic
+
+## Process
+`
+    expect(extractSkillFigureVariants(md)).toEqual(['full', 'mla-dsa'])
+  })
+  it('returns [] when the section is absent', () => {
+    expect(extractSkillFigureVariants('## Other\n- **`full`**')).toEqual([])
+  })
+})
+
 describe('integration: current files are in sync', () => {
   const typesSrc = readFileSync(resolve(REPO_ROOT, 'src/engine/types.ts'), 'utf8')
   const skillMd = readFileSync(
@@ -100,6 +118,12 @@ describe('integration: current files are in sync', () => {
   it('ArchitectureConfig discriminants — types.ts matches SKILL.md', () => {
     const inTypes = new Set<string>(extractDiscriminants(typesSrc, 'ArchitectureConfig'))
     const inSkill = new Set<string>(extractSkillArchitectureVariants(skillMd))
+    expect([...inTypes].sort()).toEqual([...inSkill].sort())
+  })
+
+  it('AttentionConfig discriminants — every one has a Figures entry in SKILL.md', () => {
+    const inTypes = new Set<string>(extractDiscriminants(typesSrc, 'AttentionConfig'))
+    const inSkill = new Set<string>(extractSkillFigureVariants(skillMd))
     expect([...inTypes].sort()).toEqual([...inSkill].sort())
   })
 
