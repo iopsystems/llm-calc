@@ -74,6 +74,29 @@ Walk through these in order. First match wins.
 
 If the model fits none of these, **stop**. Don't shoehorn into the closest variant — add a new variant to `AttentionConfig` in `types.ts` with engine integration in `memory.ts`, `prefill.ts`, `decode.ts`. Brainstorm with the user first; new attention is a meaningful design change, not a data update.
 
+A new variant also needs its two figures; see [Figures](#figures).
+
+## Figures
+
+Every attention variant has two drawings in the Info tab, and a new variant needs both before its first model entry lands. The grammar is in [`docs/architecture-figures.md`](../../../docs/architecture-figures.md).
+
+- A **schematic** (educational, hand-drawn, cited): add a `SchematicMeta` in `src/ui/schematics/meta.ts` and a `<Name>Schematic.svelte` in `src/ui/schematics/`, registered in `components.ts`. Both are `Record`s keyed by the discriminant, so `npm run check` fails until they exist. Cite the paper through `src/data/sources.ts`; fetch the URL before writing it.
+- A **geometry** case: add the variant to `lanesFor`, `headsFor` and `captionFor` in `src/ui/archGeometry.ts` (each has a `never` fallthrough) and a test in `test/ui/archGeometry.test.ts` asserting exact lanes for a real catalog entry. The catalog-wide test cross-checks lane bytes against the engine; if it fails, the lane is wrong, not the engine.
+
+Lanes per variant (kind × count field):
+
+- **`full`** — full × layers · FullSchematic
+- **`sliding`** — window × layers · SlidingSchematic
+- **`hybrid`** — window × numSlidingLayers; full × numGlobalLayers · HybridSchematic
+- **`partial`** — full × numFullLayers; pruned × (layers − numFullLayers) · PartialSchematic
+- **`mla`** — mla × layers · MlaSchematic
+- **`mla-dsa`** — dsa × layers · MlaDsaSchematic
+- **`msa-hybrid`** — full × numFullLayers; msa × numSparseLayers · MsaSchematic
+- **`csa-hca-hybrid`** — window × numSlidingLayers (omitted when 0); csa × numCsaLayers; hca × numHcaLayers · CsaHcaSchematic
+- **`linear-mla-hybrid`** — kda × numLinearLayers; mla × numFullLayers · LinearMlaSchematic
+- **`delta-hybrid`** — delta × numDeltaNetLayers; full × numFullLayers · DeltaSchematic
+- **`mamba2-hybrid`** — mamba × numMambaLayers; full × numFullLayers; ffn × numFfnLayers · Mamba2Schematic
+
 ## Process
 
 1. Pull `config.json`. Pull model card. Note `paramCount` and `activeParamCount` (if MoE).

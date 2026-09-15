@@ -63,6 +63,11 @@ export function extractSkillAttentionVariants(skillMd) {
   return Array.from(section.matchAll(/-\s+\*\*`([a-z][\w-]*)`\*\*/g)).map(m => m[1])
 }
 
+export function extractSkillFigureVariants(skillMd) {
+  const section = findSection(skillMd, '## Figures')
+  return Array.from(section.matchAll(/-\s+\*\*`([a-z][\w-]*)`\*\*/g)).map(m => m[1])
+}
+
 export function extractSkillArchitectureVariants(skillMd) {
   const section = findSection(skillMd, '## Architecture')
   return Array.from(new Set(
@@ -98,6 +103,13 @@ export function runCheck() {
   const attnExtra = [...attnSkill].filter(x => !attnTypes.has(x))
   if (attnMissing.length || attnExtra.length) {
     failures.push({ label: 'AttentionConfig discriminants', missing: attnMissing, extra: attnExtra })
+  }
+
+  const figSkill = new Set(extractSkillFigureVariants(skillMd))
+  const figMissing = [...attnTypes].filter(x => !figSkill.has(x))
+  const figExtra = [...figSkill].filter(x => !attnTypes.has(x))
+  if (figMissing.length || figExtra.length) {
+    failures.push({ label: 'Figures section (AttentionConfig discriminants)', missing: figMissing, extra: figExtra })
   }
 
   const archTypes = new Set(extractDiscriminants(typesSrc, 'ArchitectureConfig'))
