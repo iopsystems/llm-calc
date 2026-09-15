@@ -8,23 +8,24 @@ describe('computePrefill', () => {
   const opPoint = testInput.accelerator.variants[0].operatingPoints[0]
   const memory = computeMemory(testInput)
 
-  it('flops = 2 × params × prompt + 2 × layers × prompt² × hidden', () => {
-    // 2 × 1000 × 10 + 2 × 2 × 100 × 4 = 20000 + 1600 = 21600
+  it('counts active linear work plus both causal attention matrices', () => {
+    // Linear work: 2 * 1000 * 10 = 20000. Each layer has 1+...+10 = 55 causal pairs.
+    // QK+AV: 2 layers * 55 pairs * 2 heads * (2+2) dimensions * 2 FLOPs = 1760.
     const p = computePrefill(testInput, opPoint, memory)
-    expect(p.flops).toBe(21600)
+    expect(p.flops).toBe(21760)
   })
 
-  it('bytes = weightBytes + activationsPeak', () => {
-    // weights=2000, activations=960 → 2960
+  it('reads weights and activations for one prompt', () => {
+    // One prompt reads 2000 weight bytes plus 10 * (4+8) * 2 * 2 = 480 activation bytes.
+    // The two-request peak allocation is 960, but prefill models one request.
     const p = computePrefill(testInput, opPoint, memory)
-    expect(p.bytes).toBe(2960)
+    expect(p.bytes).toBe(2480)
   })
 
   it('timeS = max(flops/tflops, bytes/bw)', () => {
-    // flops/tflops = 21600 / 1e12 = 2.16e-8
-    // bytes/bw    = 2960 / 1e9    = 2.96e-6  ← bigger
+    // Compute: 21760 / 1e12 seconds. Memory: 2480 / 1e9 seconds dominates.
     const p = computePrefill(testInput, opPoint, memory)
-    expect(p.timeS).toBeCloseTo(2960 / 1e9, 12)
+    expect(p.timeS).toBeCloseTo(2480 / 1e9, 12)
     expect(p.regime).toBe('memory')
   })
 
@@ -35,10 +36,8 @@ describe('computePrefill', () => {
   })
 
   it('attention term caps at window for sliding attention', () => {
-    // testModel: layers=2, hiddenDim=4. Prompt=10. With window=5:
-    // attention term = 2 × 2 × 10 × min(10, 5) × 4 = 800 (vs full's 1600)
-    // MLP term = 2 × 1000 × 10 = 20000 (unchanged)
-    // total = 20800
+    // Visible pairs per layer: 1+2+3+4+5+5+5+5+5+5 = 40.
+    // QK+AV: 2 layers * 40 pairs * 16 FLOPs = 1280, plus 20000 linear FLOPs.
     const slidingModel = {
       ...testInput.model,
       attention: { type: 'sliding' as const, window: 5 }
@@ -46,15 +45,12 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: slidingModel }
     const slidingMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, slidingMemory)
-    expect(p.flops).toBe(20800)
+    expect(p.flops).toBe(21280)
   })
 
   it('FLOPs MLP term uses activeParams for MoE', () => {
-    // testModel: paramCount=1000, hiddenDim=4, layers=2, prompt=10.
-    // For MoE with activeParamCount=250:
-    //   MLP: 2 × 250 × 10 = 5000
-    //   Attention: 2 × 2 × 10 × 10 × 4 = 1600 (full attention, unchanged)
-    //   Total = 6600
+    // Active linear work: 2 * 250 * 10 = 5000.
+    // Attention: 2 layers * 55 causal pairs * 16 FLOPs = 1760.
     const moeModel = {
       ...testInput.model,
       architecture: {
@@ -68,16 +64,12 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: moeModel }
     const moeMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, moeMemory)
-    expect(p.flops).toBe(6600)
+    expect(p.flops).toBe(6760)
   })
 
-  it('attention term uses attentionDim for MLA (kv_lora + rope, not hidden)', () => {
-    // testModel: layers=2, hiddenDim=4, prompt=10, paramCount=1000.
-    // numHeads=2, headDim=2 → 2×2=4 matches hiddenDim, so non-MLA path unaffected.
-    // MLA with kvLoraRank=10, rope=2 → attentionDim = 12.
-    // MLP: 2 × 1000 × 10 = 20000
-    // Attention: 2 × 2 × 10 × 10 × 12 = 4800 (full attention, no sliding bound)
-    // Total = 24800
+  it('uses expanded MLA query-key and value widths during prefill', () => {
+    // Expanded MLA QK width is no-PE 2 + RoPE 2; value width is 2.
+    // 2 layers * 55 pairs * 2 heads * (4+2) * 2 FLOPs = 2640, plus 20000 linear FLOPs.
     const mlaModel = {
       ...testInput.model,
       attention: { type: 'mla' as const, kvLoraRank: 10, qkRopeHeadDim: 2, qkNopeHeadDim: 2, vHeadDim: 2 }
@@ -85,17 +77,12 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: mlaModel }
     const mlaMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, mlaMemory)
-    expect(p.flops).toBe(24800)
+    expect(p.flops).toBe(22640)
   })
 
   it('attention term uses hybrid formula in prefill flops', () => {
-    // testModel: layers=2, hiddenDim=4, paramCount=1000, prompt=10.
-    // numHeads=2, headDim=2 → attentionDim=4.
-    // Hybrid with slidingWindow=5, numSlidingLayers=1, numGlobalLayers=1:
-    //   attendedSeq(10) = 1 × min(10, 5) + 1 × 10 = 15
-    //   MLP: 2 × 1000 × 10 = 20000
-    //   Attention: 2 × 10 × 15 × 4 = 1200
-    //   Total = 21200
+    // One sliding layer has 40 pairs (1,2,3,4,5,5,5,5,5,5), global has 55.
+    // Attention: (40+55) * 16 = 1520, plus 20000 linear FLOPs.
     const hybridModel = {
       ...testInput.model,
       attention: {
@@ -108,16 +95,12 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: hybridModel }
     const hybridMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, hybridMemory)
-    expect(p.flops).toBe(21200)
+    expect(p.flops).toBe(21520)
   })
 
   it('attention term caps at topK for mla-dsa', () => {
-    // testModel: layers=2, paramCount=1000, prompt=10.
-    // MLA-DSA with kvLoraRank=10, rope=2 → attentionDim=12; topK=3 (< prompt=10).
-    //   attendedSeq = 2 × min(10, 3) = 6
-    //   MLP: 2 × 1000 × 10 = 20000
-    //   Attention: 2 × 10 × 6 × 12 = 1440
-    //   Total = 21440
+    // DSA pairs per layer: 1+2+3+3+3+3+3+3+3+3 = 27.
+    // Expanded MLA: 2 layers * 27 * 2 heads * (4+2) * 2 = 1296; linear work 20000.
     const dsaModel = {
       ...testInput.model,
       attention: { type: 'mla-dsa' as const, kvLoraRank: 10, qkRopeHeadDim: 2, qkNopeHeadDim: 2, vHeadDim: 2, topK: 3 }
@@ -125,18 +108,13 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: dsaModel }
     const dsaMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, dsaMemory)
-    expect(p.flops).toBe(21440)
+    expect(p.flops).toBe(21296)
   })
 
   it('flops for linear-mla-hybrid includes KDA per-token term', () => {
-    // testModel: layers=2, paramCount=1000, prompt=10.
-    // linear-mla-hybrid as above:
-    //   attentionDim = 5 + 1 = 6
-    //   attendedSeqlen(10) = 1 × 10 = 10  (only the 1 full layer)
-    //   MLP: 2 × 1000 × 10 = 20000
-    //   Softmax attention: 2 × 10 × 10 × 6 = 1200
-    //   KDA per-token FLOPs = 2 × 1 × 2 × 2² = 16; × 10 prompt = 160
-    //   Total = 21360
+    // One full MLA layer: 55 pairs * 2 heads * (QK width 2 + value width 1) * 2 = 660.
+    // KDA updates: 2 * 1 layer * 2 heads * 2 squared * 10 tokens = 160.
+    // Add linear work 20000 for total 20820.
     const hybridModel = {
       ...testInput.model,
       attention: {
@@ -150,19 +128,14 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: hybridModel }
     const hybridMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, hybridMemory)
-    expect(p.flops).toBe(21360)
+    expect(p.flops).toBe(20820)
   })
 
   it('flops for csa-hca-hybrid uses topK for CSA layer compute', () => {
-    // testModel base: paramCount=1000, prompt=10.
-    // csa-hca-hybrid (layers=3, same params as memory test):
-    //   attendedSeqlen(forKv=false, seqlen=10) =
-    //     1 × min(10, 2) + 1 × (csaTopK=3 + 2) + 1 × (10/4 + 2)
-    //     = 2 + 5 + 4.5 = 11.5
-    //   attentionDim = numHeads × headDim = 2 × 2 = 4
-    //   MLP: 2 × 1000 × 10 = 20000
-    //   Attention: 2 × prompt × attendedSeq × attentionDim = 2 × 10 × 11.5 × 4 = 920
-    //   Total: 20920
+    // Local pairs per layer: 1+2+2+2+2+2+2+2+2+2 = 19, across 3 layers.
+    // CSA compressed pairs: 0+1+1+2+2+3+3+3+3+3 = 21.
+    // HCA compressed pairs: 0+0+0+1+1+1+1+2+2+2 = 10.
+    // Total attention: (3*19+21+10) * 16 = 1408; linear work 20000.
     const hybridModel: ModelArch = {
       ...testInput.model,
       layers: 3,
@@ -178,6 +151,6 @@ describe('computePrefill', () => {
     const input = { ...testInput, model: hybridModel }
     const hybridMemory = computeMemory(input)
     const p = computePrefill(input, opPoint, hybridMemory)
-    expect(p.flops).toBe(20920)
+    expect(p.flops).toBe(21408)
   })
 })

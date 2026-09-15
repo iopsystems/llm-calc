@@ -303,9 +303,9 @@ describe('csa-hca-hybrid branches in existing helpers', () => {
     architecture: { type: 'dense' }
   }
 
-  it('kvBytesPerTokenPerLayer: 2 × numKvHeads × headDim × bytes (MQA-style)', () => {
-    // 2 × 1 × 8 × 2 (fp16) = 32
-    expect(kvBytesPerTokenPerLayer(base, 'fp16')).toBe(32)
+  it('kvBytesPerTokenPerLayer: numKvHeads × headDim × bytes (shared KV)', () => {
+    // 1 × 8 × 2 (fp16) = 16
+    expect(kvBytesPerTokenPerLayer(base, 'fp16')).toBe(16)
   })
 
   it('attentionDim: numHeads × headDim (full Q-head MQA)', () => {

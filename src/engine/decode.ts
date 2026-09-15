@@ -1,43 +1,45 @@
 import type { CalcInput, AcceleratorOperatingPoint, MemoryResult, PerfTier, MultiDeviceConfig } from './types'
 import { roofline } from './roofline'
 import {
-  attendedSeqlenSummedOverLayers,
-  activeParams,
-  attentionDim,
-  linearAttentionFlopsPerToken,
-  linearAttentionStateBytes,
-  deltaStateBytes,
-  deltaAttentionFlopsPerToken,
-  mambaStateBytes,
-  mambaFlopsPerToken
+  activeParams, averageDecodeCacheBytes, linearAttentionFlopsPerToken,
+  deltaAttentionFlopsPerToken, mambaFlopsPerToken
 } from './memory'
+import { averageDecodeAttentionFlops } from './attention'
 import { bytesOf } from './dtypes'
-import { commsBytesPerStep } from './parallelism'
+import { commsBytesPerStep, activeParametersOnRank, expectedWeightParameters, parallelDegrees, validateParallelism } from './parallelism'
 import { INTERCONNECTS } from '../data/interconnects'
 
 export function computeDecode(
   input: CalcInput,
   opPoint: AcceleratorOperatingPoint,
-  memory: MemoryResult,
-  multiDeviceOverride?: MultiDeviceConfig,
+  _memory: MemoryResult,
+  multiDeviceOverride?: MultiDeviceConfig | null,
 ): PerfTier['decode'] {
   const { model, quant, workload } = input
-  const multiDevice = multiDeviceOverride ?? input.decodeMultiDevice ?? input.multiDevice
-  const avgSeqlen = workload.promptTokens + workload.outputTokens / 2
-
-  const flopsPerStep =
-    (2 * activeParams(model)
-     + 2 * attendedSeqlenSummedOverLayers(model, avgSeqlen) * attentionDim(model)
-     + linearAttentionFlopsPerToken(model)
-     + deltaAttentionFlopsPerToken(model)
-     + mambaFlopsPerToken(model)) *
-    workload.concurrency
-  const bytesPerStep =
-    activeParams(model) * bytesOf(quant.weights) +
-    memory.kvCachePerRequest * workload.concurrency +
-    linearAttentionStateBytes(model, quant.kv) * workload.concurrency +  // KDA state write-back
-    deltaStateBytes(model, quant.kv) * workload.concurrency +  // DeltaNet state write-back
-    mambaStateBytes(model) * workload.concurrency  // Mamba2 SSM state write-back (fp32)
+  const multiDevice = multiDeviceOverride === undefined
+    ? input.decodeMultiDevice ?? input.multiDevice : multiDeviceOverride ?? undefined
+  validateParallelism(multiDevice, model)
+  const { tp, ep, dp } = parallelDegrees(multiDevice)
+  const batch = workload.concurrency
+  const replicaBatch = Math.ceil(batch / dp)
+  const attentionFlops = averageDecodeAttentionFlops(model, workload.promptTokens, workload.outputTokens)
+  const recurrentFlops = linearAttentionFlopsPerToken(model)
+    + deltaAttentionFlopsPerToken(model) + mambaFlopsPerToken(model)
+  const flopsPerStep = (2 * activeParams(model) + attentionFlops + recurrentFlops) * batch
+  const cache = averageDecodeCacheBytes(model, quant.kv, workload.promptTokens, workload.outputTokens)
+  // Aggregate logical work remains available for inspection. Runtime uses the
+  // most-loaded DP replica with ideal EP balance; each replica loads its own weights.
+  const smallerBatch = Math.floor(batch / dp)
+  const largerReplicas = batch % dp
+  const weightParams = largerReplicas * expectedWeightParameters(model, smallerBatch + 1)
+    + (dp - largerReplicas) * expectedWeightParameters(model, smallerBatch)
+  const bytesPerStep = weightParams * bytesOf(quant.weights)
+    + (cache.bytes + cache.recurrentBytes) * batch
+  const rankCache = averageDecodeCacheBytes(model, quant.kv, workload.promptTokens, workload.outputTokens, tp)
+  const rankFlops = (2 * activeParametersOnRank(model, tp, ep)
+    + (attentionFlops + recurrentFlops) / tp) * replicaBatch
+  const rankBytes = expectedWeightParameters(model, replicaBatch, tp, ep) * bytesOf(quant.weights)
+    + (rankCache.bytes + rankCache.recurrentBytes) * replicaBatch
 
   const tflops = opPoint.tflops[quant.activations]
   if (tflops === undefined) {
@@ -47,7 +49,7 @@ export function computeDecode(
   let commsBytes: number | undefined = undefined
   let interconnectBwGBs: number | undefined = undefined
   if (multiDevice) {
-    const B = workload.concurrency  // decode: one token per request per pass
+    const B = replicaBatch  // decode: one token per request in this DP replica
     commsBytes = commsBytesPerStep(
       multiDevice.parallelism,
       multiDevice.parallelismDegrees,
@@ -60,13 +62,14 @@ export function computeDecode(
   }
 
   const { timeS, regime } = roofline({
-    flops: flopsPerStep, bytes: bytesPerStep,
+    flops: rankFlops, bytes: rankBytes,
     tflops, bwGBs: opPoint.hbmBandwidthGBs,
     commsBytes, interconnectBwGBs
   })
 
   const mtpFactor = 1 + model.numNextnLayers
   return {
+    rankFlops, rankBytes,
     flopsPerStep,
     bytesPerStep,
     timePerTokenS: timeS / mtpFactor,

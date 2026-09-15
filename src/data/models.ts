@@ -236,7 +236,7 @@ export const MODELS: ModelArch[] = [
     },
     architecture: { type: 'dense' }
   },
-  // === Qwen3.5 MoE series (Gated DeltaNet + Gated Attention hybrid) ===
+  // === Qwen3.5 large models (Gated DeltaNet + Gated Attention hybrid) ===
   {
     id: 'qwen3.5-27b', name: 'Qwen3.5-27B', family: 'qwen3.5',
     publisher: 'Alibaba', releaseDate: '2026-02',
@@ -249,22 +249,16 @@ export const MODELS: ModelArch[] = [
     attention: {
       type: 'delta-hybrid',
       numDeltaNetLayers: 48, numFullLayers: 16,
-      numDeltaNetHeads: 64, deltaHeadDim: 128,
+      numDeltaNetHeads: 48, deltaHeadDim: 128,
       ropeDim: 64
     },
-    architecture: {
-      type: 'moe',
-      numExperts: 128,
-      numExpertsActive: 8,
-      numSharedExperts: 0,
-      activeParamCount: 2_700_000_000
-    }
+    architecture: { type: 'dense' }
   },
   {
     id: 'qwen3.5-35b-a3b', name: 'Qwen3.5-35B-A3B', family: 'qwen3.5',
     publisher: 'Alibaba', releaseDate: '2026-02',
     nativeDtype: 'bf16',
-    layers: 40, hiddenDim: 2048, intermediateDim: 768,
+    layers: 40, hiddenDim: 2048, intermediateDim: 512,
     numHeads: 16, numKvHeads: 2, headDim: 256, vocabSize: 248320,
     paramCount: 35_000_000_000,
     maxContext: 262144,
@@ -272,7 +266,7 @@ export const MODELS: ModelArch[] = [
     attention: {
       type: 'delta-hybrid',
       numDeltaNetLayers: 30, numFullLayers: 10,
-      numDeltaNetHeads: 64, deltaHeadDim: 128,
+      numDeltaNetHeads: 32, deltaHeadDim: 128,
       ropeDim: 64
     },
     architecture: {

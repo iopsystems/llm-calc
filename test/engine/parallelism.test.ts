@@ -106,17 +106,18 @@ describe('perRankMemoryDivisors', () => {
     expect(d.replicas).toBe(1)
   })
 
-  it('EP=8 MoE: weights/8 (first-cut approximation)', () => {
+  it('EP=8 MoE: shared pool replicates', () => {
     const d = perRankMemoryDivisors(['ep'], { ep: 8 }, moe)
-    expect(d.weights).toBe(8)
+    // shared=(13 - 47/4)/(1 - 1/4)=5/3 billion; routed=136/3 billion.
+    expect(d.weights).toBeCloseTo(47 / (5/3 + (136/3)/8))
     expect(d.kv).toBe(1)
     expect(d.activations).toBe(1)
     expect(d.replicas).toBe(1)
   })
 
-  it('TP=8 × EP=8 MoE: weights/64 (TP × EP shard expert weights)', () => {
+  it('TP=8 × EP=8 MoE: TP shards both pools, EP only routed weights', () => {
     const d = perRankMemoryDivisors(['tp', 'ep'], { tp: 8, ep: 8 }, moe)
-    expect(d.weights).toBe(64)
+    expect(d.weights).toBeCloseTo(47 / ((5/3 + (136/3)/8)/8))
     expect(d.kv).toBe(8)
     expect(d.activations).toBe(8)
     expect(d.replicas).toBe(1)
@@ -193,11 +194,11 @@ describe('defaultParallelism', () => {
     expect(p.parallelismDegrees).toEqual({ tp: 8 })
   })
 
-  it('MoE on HGX (N=8): TP=8, EP=8', () => {
+  it('MoE on HGX (N=8): TP=8', () => {
     const p = defaultParallelism(hgxH100, moe)
     expect(p.parallelism).toContain('tp')
-    expect(p.parallelism).toContain('ep')
-    expect(p.parallelismDegrees).toEqual({ tp: 8, ep: 8 })
+    expect(p.parallelism).toEqual(['tp'])
+    expect(p.parallelismDegrees).toEqual({ tp: 8 })
   })
 
   it('dense on NVL72 (N=72): TP=8 × PP=9', () => {
@@ -207,10 +208,10 @@ describe('defaultParallelism', () => {
     expect(p.parallelismDegrees).toEqual({ tp: 8, pp: 9 })
   })
 
-  it('MoE on NVL72 (N=72): TP=8 × PP=9 × EP=72', () => {
+  it('MoE on NVL72 (N=72): TP=8 × PP=9', () => {
     const p = defaultParallelism(nvl72, moe)
-    expect(p.parallelism.sort()).toEqual(['ep', 'pp', 'tp'].sort())
-    expect(p.parallelismDegrees).toEqual({ tp: 8, pp: 9, ep: 72 })
+    expect(p.parallelism.sort()).toEqual(['pp', 'tp'].sort())
+    expect(p.parallelismDegrees).toEqual({ tp: 8, pp: 9 })
   })
 
   it('dense single-node MI300X (N=8): TP=8', () => {

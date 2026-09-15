@@ -3,6 +3,7 @@ import { calculate } from '../../src/engine/calc'
 import { bytesOf } from '../../src/engine/dtypes'
 import { ACCELERATORS, MODELS } from '../../src/data'
 import { SYSTEMS } from '../../src/data/systems'
+import { expectedWeightParameters } from '../../src/engine/parallelism'
 import { INTERCONNECTS } from '../../src/data/interconnects'
 import type { CalcInput, DerivationStep } from '../../src/engine/types'
 
@@ -124,8 +125,8 @@ function auditConfig(input: CalcInput, ctx: string) {
   expectClose(decodeBytes.value, anyTier.decode.bytesPerStep, `${ctx}: decode bytes row`)
   expectClose(
     prefillBytes.value,
-    row(d, 'weights').value + prefillAct.value,
-    `${ctx}: prefill bytes = weights + prefill_activations`
+    expectedWeightParameters(model, workload.promptTokens) * bytesOf(quant.weights) + prefillAct.value / workload.concurrency,
+    `${ctx}: prefill bytes = prompt expert union + one prompt activations`
   )
 
   const prefillComms = maybeRow(d, 'prefill comms bytes')
@@ -156,8 +157,8 @@ function auditConfig(input: CalcInput, ctx: string) {
 
     const prefillTimeRow = row(d, `prefill time @ ${op.id}`)
     const expectedPrefill = Math.max(
-      prefillFlops.value / t,
-      prefillBytes.value / bw,
+      row(d, 'prefill rank flops').value / t,
+      row(d, 'prefill rank bytes').value / bw,
       icBw !== undefined && prefillComms ? prefillComms.value / icBw : 0
     )
     expectClose(prefillTimeRow.value, expectedPrefill, `${ctx}: prefill time @ ${op.id}`)
@@ -165,8 +166,8 @@ function auditConfig(input: CalcInput, ctx: string) {
 
     const decodeTimeRow = row(d, `decode time per token @ ${op.id}`)
     const expectedDecodeBase = Math.max(
-      decodeFlops.value / t,
-      decodeBytes.value / bw,
+      row(d, 'decode rank flops').value / t,
+      row(d, 'decode rank bytes').value / bw,
       icBw !== undefined && decodeComms ? decodeComms.value / icBw : 0
     )
     const expectedDecode = expectedDecodeBase / (1 + model.numNextnLayers)
@@ -192,9 +193,8 @@ describe('derivation audit — formulas reproduce values across the catalog', ()
     }
   })
 
-  it('multi-device: every model on HGX H100-8 (TP=8, +EP=8 for MoE)', () => {
+  it('multi-device: every model on HGX H100-8 (TP=8)', () => {
     for (const m of MODELS) {
-      const moe = m.architecture.type === 'moe'
       auditConfig({
         accelerator: h100,
         acceleratorVariantId: 'sxm-80',
@@ -203,8 +203,8 @@ describe('derivation audit — formulas reproduce values across the catalog', ()
         workload: { promptTokens: 8192, outputTokens: 512, concurrency: 64 },
         multiDevice: {
           system: hgxH100,
-          parallelism: moe ? ['tp', 'ep'] : ['tp'],
-          parallelismDegrees: moe ? { tp: 8, ep: 8 } : { tp: 8 }
+          parallelism: ['tp'],
+          parallelismDegrees: { tp: 8 }
         }
       }, `${m.id} (multi)`)
     }

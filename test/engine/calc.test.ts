@@ -25,8 +25,10 @@ describe('calculate', () => {
   it('perf.peak has all the expected fields', () => {
     const r = calculate(testInput)
     const p = r.perf['peak']
-    expect(p.prefill.flops).toBe(21600)
-    expect(p.decode.flopsPerStep).toBe(4400)
+    // Prefill: 20000 linear + 2 layers * (1+...+10) pairs * 16 QK+AV FLOPs.
+    expect(p.prefill.flops).toBe(21760)
+    // Decode positions 10..14 average 12: (2000 + 2*12*16) * 2 requests.
+    expect(p.decode.flopsPerStep).toBe(4768)
     expect(p.ttftS).toBe(p.prefill.timeS)
     expect(p.outputTokenRate).toBeCloseTo(p.decode.aggregateTokensPerS, 9)
     expect(p.inputTokenRate).toBeCloseTo(testInput.workload.promptTokens / p.prefill.timeS, 6)
@@ -478,17 +480,20 @@ describe('calculate — DeepSeek V3.2 (DSA) integration', () => {
     expect(r32.memory.kvCachePerRequest).toBe(61 * (512 + 64) * 2 * 32768)
   })
 
-  it('V3.2 prefill attention term shrinks by ratio seqlen/topK ≈ 16× vs V3', () => {
+  it('V3.2 prefill counts causal pairs before and after topK saturation', () => {
     const r3 = calculate({ ...baseInput, model: v3 })
     const r32 = calculate({ ...baseInput, model: v32 })
     // MLP term identical (same activeParams, same prompt). Attention term differs.
     const mlpTerm = 2 * 37_000_000_000 * 32768
     const v3AttentionTerm = r3.perf['peak'].prefill.flops - mlpTerm
     const v32AttentionTerm = r32.perf['peak'].prefill.flops - mlpTerm
-    // V3:   attendedSeq = 61 × 32768 = 1_998_848
-    // V3.2: attendedSeq = 61 × 2048  = 124_928 (capped at topK)
-    // Ratio: 32768 / 2048 = 16
-    expect(v3AttentionTerm / v32AttentionTerm).toBeCloseTo(32768 / 2048, 6)
+    // Full queries attend 1..32768 slots. DSA grows 1..2048, then stays at 2048.
+    const fullPairs = 32768 * 32769 / 2
+    const sparsePairs = 2048 * 2049 / 2 + (32768 - 2048) * 2048
+    // Expanded MLA: 128 heads, QK width 128+64, value width 128, two FLOPs per dimension.
+    const perPairAllLayers = 61 * 128 * (128 + 64 + 128) * 2
+    expect(v3AttentionTerm).toBe(fullPairs * perPairAllLayers)
+    expect(v32AttentionTerm).toBe(sparsePairs * perPairAllLayers)
   })
 })
 
@@ -648,15 +653,15 @@ describe('calculate — DeepSeek V4 integration', () => {
       workload: { promptTokens: 1048576, outputTokens: 0, concurrency: 1 }
     }
     const r = calculate(input)
-    // Per-compressed-entry bytes = 2 × 1 × 512 × 2 = 2048
+    // One shared main KV vector per slot: 512 dimensions * 2 bytes = 1024.
     // attendedSeqlen (kv) = 0 + 30 × (1048576/4 + 128) + 31 × (1048576/128 + 128)
     //                    = 30 × 262272 + 31 × 8320 = 7868160 + 257920 = 8126080
-    // kvCachePerRequest = 2048 × 8126080 = 16_642_211_840 bytes ≈ 16.64 GB
-    const expected = 2048 * (30 * (1048576 / 4 + 128) + 31 * (1048576 / 128 + 128))
+    // kvCachePerRequest = 1024 * 8126080 = 8_321_105_920 bytes.
+    const expected = 1024 * (30 * (1048576 / 4 + 128) + 31 * (1048576 / 128 + 128))
     expect(r.memory.kvCachePerRequest).toBe(expected)
   })
 
-  it('V4-Pro at 1M: KV cache is ~4.4× smaller than V3.2 at fp16 apples-to-apples', () => {
+  it('V4-Pro at 1M: main KV cache is ~8.9× smaller than V3.2 at fp16', () => {
     const baseInput: Omit<CalcInput, 'model'> = {
       accelerator: h100,
       acceleratorVariantId: 'sxm-80',
@@ -666,10 +671,10 @@ describe('calculate — DeepSeek V4 integration', () => {
     const r4 = calculate({ ...baseInput, model: v4Pro })
     const r32 = calculate({ ...baseInput, model: v32 })
     const ratio = r32.memory.kvCachePerRequest / r4.memory.kvCachePerRequest
-    // V4-Pro fp16 / V3.2 fp16: actual ≈ 4.43×
-    // Paper's "10×" claim assumes V4 uses fp8 KV — that's a deployment choice, not modeled here.
-    expect(ratio).toBeGreaterThan(4)
-    expect(ratio).toBeLessThan(5)
+    // Compare modeled main caches at identical precision; auxiliary indexer/compressor state is omitted.
+    const v32Bytes = 61 * (512 + 64) * 2 * 1048576
+    const v4Bytes = 512 * 2 * (30 * (262144 + 128) + 31 * (8192 + 128))
+    expect(ratio).toBeCloseTo(v32Bytes / v4Bytes, 9)
   })
 
   it('V4-Pro decode throughput is 2× the without-MTP equivalent (numNextnLayers=1)', () => {
@@ -703,10 +708,9 @@ describe('calculate — DeepSeek V4 integration', () => {
       workload: { promptTokens: 131072, outputTokens: 0, concurrency: 1 }
     }
     const r = calculate(input)
-    // 2048 × (2 × 128 + 21 × (131072/4 + 128) + 20 × (131072/128 + 128))
-    //      = 2048 × (256 + 690816 + 23040)
-    //      = 2048 × 714112 = 1_462_501_376 ≈ 1.46 GB
-    const expected = 2048 * (
+    // One 512-wide FP16 vector per slot; compressed blocks are complete at this context.
+    // 1024 * (256 + 690816 + 23040) = 731_250_688 bytes.
+    const expected = 1024 * (
       2 * 128 +
       21 * (131072 / 4 + 128) +
       20 * (131072 / 128 + 128)
@@ -733,7 +737,7 @@ describe('calculate — DeepSeek V4 integration', () => {
 describe('calculate — Qwen3.5 delta-hybrid integration', () => {
   const h100 = ACCELERATORS.find(a => a.id === 'h100')!
 
-  it('Qwen3.5-4B at 32k prompt: KV cache uses only 8 Gated Attention layers; DeltaNet state adds ~24 MB', () => {
+  it('Qwen3.5-4B at 32k prompt: KV cache uses only 8 Gated Attention layers; FP32 DeltaNet state adds ~50 MB', () => {
     const qwen = MODELS.find(m => m.id === 'qwen3.5-4b')!
     const input: CalcInput = {
       accelerator: h100,
@@ -744,7 +748,7 @@ describe('calculate — Qwen3.5 delta-hybrid integration', () => {
     }
     const r = calculate(input)
     const kv = 4096 * 262144
-    const state = 24 * 32 * 128 * 128 * 2
+    const state = 24 * 32 * 128 * 128 * 4  // FP32 recurrent state
     expect(r.memory.kvCachePerRequest).toBe(kv + state)
     const fullEq = 2 * 32 * 4 * 256 * 2 * 32768
     expect(fullEq / r.memory.kvCachePerRequest).toBeGreaterThan(3.5)
@@ -764,7 +768,7 @@ describe('calculate — Qwen3.5 delta-hybrid integration', () => {
     expect(r.memory.weights / 1e9).toBeCloseTo(794, 0)
     expect(r.memory.fits).toBe(false)
     const kv = 2 * 2 * 256 * 2 * 15 * 32768
-    const state = 45 * 64 * 128 * 128 * 2
+    const state = 45 * 64 * 128 * 128 * 4  // FP32 recurrent state
     expect(r.memory.kvCachePerRequest).toBe(kv + state)
   })
 
@@ -784,7 +788,7 @@ describe('calculate — Qwen3.5 delta-hybrid integration', () => {
     expect(r.perf['peak'].decode.regime).toBe('memory')
   })
 
-  it('Qwen3.5-27B at 32k prompt: MoE with delta-hybrid attention', () => {
+  it('Qwen3.5-27B at 32k prompt: dense model with delta-hybrid attention', () => {
     const qwen = MODELS.find(m => m.id === 'qwen3.5-27b')!
     const input: CalcInput = {
       accelerator: h100,
@@ -795,7 +799,7 @@ describe('calculate — Qwen3.5 delta-hybrid integration', () => {
     }
     const r = calculate(input)
     const kv = 4096 * 16 * 32768
-    const state = 48 * 64 * 128 * 128 * 2
+    const state = 48 * 48 * 128 * 128 * 4  // 48 value heads, FP32
     expect(r.memory.kvCachePerRequest).toBe(kv + state)
   })
 
@@ -810,7 +814,7 @@ describe('calculate — Qwen3.5 delta-hybrid integration', () => {
     }
     const r = calculate(input)
     const kv = 4096 * 8 * 65536
-    const state = 24 * 32 * 128 * 128 * 2
+    const state = 24 * 32 * 128 * 128 * 4  // FP32 recurrent state
     expect(r.memory.kvCachePerRequest).toBe(kv + state)
     const fullEq = 2 * 32 * 4 * 256 * 2 * 65536
     const ratio = fullEq / r.memory.kvCachePerRequest
@@ -898,7 +902,7 @@ describe('calculate — multi-GPU integration', () => {
     expect(['compute', 'memory', 'comms']).toContain(r.perf['peak'].decode.regime)
   })
 
-  it('GB200 NVL72 + DeepSeek V3 + TP=8 × EP=72: weights / 576 fits per GPU', () => {
+  it('GB200 NVL72 + DeepSeek V3 + TP=8 × PP=9: all model weights conserved across 72 GPUs', () => {
     const gb200 = ACCELERATORS.find(a => a.id === 'gb200')!
     const input: CalcInput = {
       accelerator: gb200,
@@ -908,13 +912,15 @@ describe('calculate — multi-GPU integration', () => {
       workload: { promptTokens: 2048, outputTokens: 512, concurrency: 1 },
       multiDevice: {
         system: nvl72,
-        parallelism: ['tp', 'ep'],
-        parallelismDegrees: { tp: 8, ep: 72 }
+        parallelism: ['tp', 'pp'],
+        parallelismDegrees: { tp: 8, pp: 9 }
       }
     }
     const r = calculate(input)
     expect(r.memory.perRank).toBeDefined()
-    expect(r.memory.perRank!.weights / 1e9).toBeLessThan(5)
+    // Independent tensor and pipeline axes use exactly 8*9 physical devices.
+    expect(r.memory.perRank!.weights).toBe(671_000_000_000 * 2 / 72)
+    expect(r.memory.perRank!.weights * 72).toBe(671_000_000_000 * 2)
     expect(r.memory.perRank!.fits).toBe(true)
   })
 
@@ -1359,7 +1365,7 @@ describe('derivation — formulas match what the engine computed', () => {
       multiDevice: {
         system: hgxH100,
         parallelism: ['tp', 'ep'],
-        parallelismDegrees: { tp: 8, ep: 8 }
+        parallelismDegrees: { tp: 2, ep: 4 }
       }
     })
     const t = r.derivation.find(s => s.label === 'prefill time @ peak')!
@@ -1442,8 +1448,8 @@ describe('calculate — 2026-H2 additions (Kimi K3, Qwen3.8, GLM-5.3)', () => {
     })
     // Full-attn KV: kvHeads 4 × 2(K+V) × headDim 256 × 2B × 16 layers × seq
     const kv = 4 * 2 * 256 * 2 * 16 * 32768
-    // DeltaNet state: 48 layers × 48 value heads × 128² × 2B
-    const state = 48 * 48 * 128 * 128 * 2
+    // DeltaNet state: 48 layers × 48 value heads × 128² × 4B (FP32)
+    const state = 48 * 48 * 128 * 128 * 4  // FP32 recurrent state
     expect(r.memory.kvCachePerRequest).toBe(kv + state)
     // Dense 27B: weights ≈ 54 GB at fp16, fits in 80 GB
     expect(r.memory.weights / 1e9).toBeCloseTo(54, 0)
@@ -1457,7 +1463,7 @@ describe('calculate — 2026-H2 additions (Kimi K3, Qwen3.8, GLM-5.3)', () => {
       workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
     })
     const kv = 4 * 2 * 256 * 2 * 23 * 32768
-    const state = 69 * 128 * 128 * 128 * 2
+    const state = 69 * 128 * 128 * 128 * 4  // FP32 recurrent state
     expect(r.memory.kvCachePerRequest).toBe(kv + state)
     // 2.4T × 2B = 4.8 TB, nowhere near one H100
     expect(r.memory.fits).toBe(false)
@@ -1497,7 +1503,10 @@ describe('calculate — MiniMax M3 (MSA blockwise top-k sparse) integration', ()
     const expected = (kv === 'bf16' ? 134.25 : 67.125) * 2 ** 30
     expect(r.memory.kvCachePerRequest).toBe(expected)
     expect(r.memory.kvCacheTotal).toBe(2 * expected)
-    expect(r.perf.peak.decode.bytesPerStep).toBe(46_000_000_000 + 2 * expected)
+    // Two independent top-8-of-256 routes: first touches 23B parameters.
+    // The second additionally touches 8/256 of the 428B-23B previously unused pool.
+    const expectedWeightBytes = 2 * (23_000_000_000 + (428_000_000_000 - 23_000_000_000) / 32)
+    expect(r.perf.peak.decode.bytesPerStep).toBe(expectedWeightBytes + 2 * expected)
   })
 
   it('decode FLOPs at 128k: 57 sparse layers capped at 16 blocks × 128 = 2048 tokens', () => {
@@ -1508,7 +1517,7 @@ describe('calculate — MiniMax M3 (MSA blockwise top-k sparse) integration', ()
     const attended = 3 * 131072 + 57 * 2048
     const attnDim = 64 * 128
     expect(r.perf['peak'].decode.flopsPerStep)
-      .toBe(2 * 23_000_000_000 + 2 * attended * attnDim)
+      .toBe(2 * 23_000_000_000 + 4 * attended * attnDim)
     // vs hypothetical all-full 60 × 131072: attention FLOPs cut > 15×
     expect((60 * 131072) / attended).toBeGreaterThan(15)
   })

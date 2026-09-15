@@ -9,25 +9,27 @@ describe('computeDecode', () => {
   const memory = computeMemory(testInput)
 
   // testInput: prompt=10, output=5, concurrency=2
-  // avg seqlen for decode attention ≈ prompt + output/2 = 12.5
+  // Decode positions are 10, 11, 12, 13, 14: average visible length is 12.
 
-  it('flopsPerStep = (2 × params + 2 × layers × seqlen_avg × hidden) × concurrency', () => {
-    // (2 × 1000 + 2 × 2 × 12.5 × 4) × 2 = (2000 + 200) × 2 = 4400
+  it('counts both attention matrices at the average generated position', () => {
+    // Linear work: 2 * 1000 = 2000 per request.
+    // QK+AV: 2 layers * 12 average slots * 2 heads * (2+2) * 2 = 384.
+    // Two requests: (2000+384) * 2 = 4768.
     const d = computeDecode(testInput, opPoint, memory)
-    expect(d.flopsPerStep).toBe(4400)
+    expect(d.flopsPerStep).toBe(4768)
   })
 
-  it('bytesPerStep = weightBytes + kvPerRequest × concurrency', () => {
-    // weights=2000, kvPerRequest=240 → 2000 + 240×2 = 2480
+  it('reads weights plus average KV traffic for the batch', () => {
+    // Weights: 2000 bytes. Mean KV per request: 2 layers * 12 slots * K/V 2 * 1 KV head * 2 dims * 2 bytes = 192.
+    // Two requests: 2000 + 192*2 = 2384 bytes; final capacity is not average traffic.
     const d = computeDecode(testInput, opPoint, memory)
-    expect(d.bytesPerStep).toBe(2480)
+    expect(d.bytesPerStep).toBe(2384)
   })
 
   it('timePerTokenS = max(flopsPerStep/tflops, bytesPerStep/bw)', () => {
-    // flops/tflops = 4400 / 1e12 = 4.4e-9
-    // bytes/bw    = 2480 / 1e9  = 2.48e-6  ← bigger
+    // Compute: 4768 / 1e12 seconds. Memory: 2384 / 1e9 seconds dominates.
     const d = computeDecode(testInput, opPoint, memory)
-    expect(d.timePerTokenS).toBeCloseTo(2480 / 1e9, 12)
+    expect(d.timePerTokenS).toBeCloseTo(2384 / 1e9, 12)
     expect(d.regime).toBe('memory')
   })
 
@@ -37,9 +39,8 @@ describe('computeDecode', () => {
   })
 
   it('attention term caps at window for sliding attention', () => {
-    // testModel: layers=2, hiddenDim=4, concurrency=2.
-    // avgSeqlen = 10 + 5/2 = 12.5. With window=8, effSeqlen = 8.
-    // flopsPerStep = (2 × 1000 + 2 × 2 × 8 × 4) × 2 = (2000 + 128) × 2 = 4256
+    // Positions 10..14 each attend 8 slots in each of 2 layers.
+    // Attention: 2 * 8 * 16 = 256 per request. Total: (2000+256) * 2 = 4512.
     const slidingModel = {
       ...testInput.model,
       attention: { type: 'sliding' as const, window: 8 }
@@ -47,15 +48,14 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: slidingModel }
     const slidingMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, slidingMemory)
-    expect(d.flopsPerStep).toBe(4256)
+    expect(d.flopsPerStep).toBe(4512)
   })
 
-  it('bytesPerStep weight term uses activeParams for MoE', () => {
-    // testModel: paramCount=1000, fp16 weights → 2 bytes/param.
-    // For MoE with activeParamCount=250:
-    //   weight bytes per step = 250 × 2 = 500
-    //   kv per request = 240 (existing fixture), × concurrency 2 = 480
-    //   total bytesPerStep = 500 + 480 = 980
+  it('reads the expected union of routed experts across the batch', () => {
+    // Four equal 250-parameter experts, one route per request, uniform independent routing.
+    // Of 16 ordered pairs of routes, 4 touch one expert and 12 touch two.
+    // Expected weight bytes: ((4*250 + 12*500)/16) * 2 = 875.
+    // Mean KV: 192 bytes/request * 2. Total: 875+384 = 1259.
     const moeModel = {
       ...testInput.model,
       architecture: {
@@ -69,14 +69,13 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: moeModel }
     const moeMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, moeMemory)
-    expect(d.bytesPerStep).toBe(980)
+    expect(d.bytesPerStep).toBe(1259)
   })
 
   it('flopsPerStep MLP term uses activeParams for MoE', () => {
-    // testModel: paramCount=1000, hiddenDim=4, layers=2, concurrency=2.
-    // avgSeqlen = 10 + 5/2 = 12.5.
-    // For MoE with activeParamCount=250:
-    //   (2 × 250 + 2 × 2 × 12.5 × 4) × 2 = (500 + 200) × 2 = 1400
+    // Linear work still uses active parameters per token: 2*250 = 500.
+    // Attention per request: 2 layers * 12 average slots * 16 = 384.
+    // Two requests: (500+384)*2 = 1768.
     const moeModel = {
       ...testInput.model,
       architecture: {
@@ -90,15 +89,13 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: moeModel }
     const moeMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, moeMemory)
-    expect(d.flopsPerStep).toBe(1400)
+    expect(d.flopsPerStep).toBe(1768)
   })
 
-  it('attention term uses attentionDim for MLA (kv_lora + rope, not hidden)', () => {
-    // testModel: layers=2, hiddenDim=4, paramCount=1000, concurrency=2.
-    // numHeads=2, headDim=2 → 2×2=4 matches hiddenDim (non-MLA path unaffected).
-    // avgSeqlen = 10 + 5/2 = 12.5.
-    // MLA with kvLoraRank=10, rope=2 → attentionDim = 12.
-    // flopsPerStep = (2×1000 + 2×2×12.5×12) × 2 = (2000 + 600) × 2 = 5200
+  it('uses absorbed MLA query-key and latent-value widths during decode', () => {
+    // Absorbed MLA QK width is latent 10 + RoPE 2; AV aggregates latent width 10.
+    // Attention per request: 2 layers * 12 slots * 2 heads * (12+10) * 2 = 2112.
+    // Add linear 2000 and multiply by batch 2: 8224.
     const mlaModel = {
       ...testInput.model,
       attention: { type: 'mla' as const, kvLoraRank: 10, qkRopeHeadDim: 2, qkNopeHeadDim: 2, vHeadDim: 2 }
@@ -106,16 +103,12 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: mlaModel }
     const mlaMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, mlaMemory)
-    expect(d.flopsPerStep).toBe(5200)
+    expect(d.flopsPerStep).toBe(8224)
   })
 
   it('attention term uses hybrid formula in decode flopsPerStep', () => {
-    // testModel: layers=2, hiddenDim=4, paramCount=1000, concurrency=2.
-    // numHeads=2, headDim=2 → attentionDim=4.
-    // avgSeqlen = 10 + 5/2 = 12.5.
-    // Hybrid with slidingWindow=5, numSlidingLayers=1, numGlobalLayers=1:
-    //   attendedSeq(12.5) = 1 × min(12.5, 5) + 1 × 12.5 = 17.5
-    //   flopsPerStep = (2×1000 + 2×17.5×4) × 2 = (2000 + 140) × 2 = 4280
+    // One sliding layer attends 5 slots at each position; global layer averages 12.
+    // QK+AV: (5+12)*16 = 272 per request. Total: (2000+272)*2 = 4544.
     const hybridModel = {
       ...testInput.model,
       attention: {
@@ -128,15 +121,13 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: hybridModel }
     const hybridMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, hybridMemory)
-    expect(d.flopsPerStep).toBe(4280)
+    expect(d.flopsPerStep).toBe(4544)
   })
 
   it('attention term caps at topK for mla-dsa', () => {
-    // testModel: layers=2, paramCount=1000, concurrency=2.
-    // avgSeqlen = 10 + 5/2 = 12.5.
-    // MLA-DSA with kvLoraRank=10, rope=2 → attentionDim=12; topK=4 (< 12.5).
-    //   attendedSeq = 2 × min(12.5, 4) = 8
-    //   flopsPerStep = (2×1000 + 2×8×12) × 2 = (2000 + 192) × 2 = 4384
+    // DSA selects 4 available slots at each position in both layers.
+    // Absorbed MLA: 2 layers * 4 slots * 2 heads * (12+10) * 2 = 704.
+    // Total: (2000+704)*2 = 5408.
     const dsaModel = {
       ...testInput.model,
       attention: { type: 'mla-dsa' as const, kvLoraRank: 10, qkRopeHeadDim: 2, qkNopeHeadDim: 2, vHeadDim: 2, topK: 4 }
@@ -144,21 +135,15 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: dsaModel }
     const dsaMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, dsaMemory)
-    expect(d.flopsPerStep).toBe(4384)
+    expect(d.flopsPerStep).toBe(5408)
   })
 
   it('flopsPerStep and bytesPerStep for linear-mla-hybrid include KDA terms', () => {
-    // testModel: layers=2, paramCount=1000, concurrency=2.
-    // avgSeqlen = 10 + 5/2 = 12.5.
-    // linear-mla-hybrid (kvLoraRank=5, rope=1, numLinear=1, numFull=1,
-    //                    numLinearHeads=2, linearHeadDim=2):
-    //   attentionDim = 6
-    //   attendedSeqlen(12.5) = 1 × 12.5 = 12.5  (only the 1 full layer)
-    //   KDA per-token FLOPs = 2 × 1 × 2 × 2² = 16
-    //   flopsPerStep = (2 × 1000 + 2 × 12.5 × 6 + 16) × 2 = (2000 + 150 + 16) × 2 = 4332
-    //   memory.kvCachePerRequest (from prompt+output=15) = 12 × 15 + 16 = 196
-    //   KDA state bytes = 16
-    //   bytesPerStep = 1000 × 2 + 196 × 2 + 16 × 2 = 2000 + 392 + 32 = 2424
+    // One full MLA layer: 12 average slots * 2 heads * (QK width 6 + latent value width 5) * 2 = 528.
+    // KDA updates: 2 * 1 layer * 2 heads * 2 squared = 16 per request.
+    // Total FLOPs: (2000+528+16)*2 = 5088.
+    // Mean cache: (latent 5 + RoPE 1)*2 bytes*12 slots + 16 state bytes = 160.
+    // Read and write state: (160+16)*2 requests + 2000 weights = 2352 bytes.
     const hybridModel = {
       ...testInput.model,
       attention: {
@@ -172,8 +157,8 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: hybridModel }
     const hybridMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, hybridMemory)
-    expect(d.flopsPerStep).toBe(4332)
-    expect(d.bytesPerStep).toBe(2424)
+    expect(d.flopsPerStep).toBe(5088)
+    expect(d.bytesPerStep).toBe(2352)
   })
 
   it('MTP doubles aggregateTokensPerS and halves timePerTokenS for numNextnLayers=1', () => {
@@ -191,16 +176,12 @@ describe('computeDecode', () => {
   })
 
   it('flopsPerStep and bytesPerStep for csa-hca-hybrid include all three layer types', () => {
-    // testModel base: paramCount=1000, concurrency=2, prompt+output=15.
-    // avgSeqlen = 12.5.
-    // csa-hca-hybrid (layers=3):
-    //   attendedSeqlen(forKv=false, 12.5) =
-    //     1 × min(12.5, 2) + 1 × (csaTopK=3 + 2) + 1 × (12.5/4 + 2)
-    //     = 2 + 5 + 5.125 = 12.125
-    //   attentionDim = 4
-    //   flopsPerStep = (2 × 1000 + 2 × 12.125 × 4) × 2 = (2000 + 97) × 2 = 4194
-    //   memory.kvCachePerRequest (from prompt+output=15) = 138
-    //   bytesPerStep = 1000 × 2 + 138 × 2 = 2276
+    // Positions 10..14: 3 local branches each attend 2 slots; CSA selects 3 slots.
+    // HCA complete slots are 2,2,3,3,3, averaging 2.6.
+    // Attention per request: (6+3+2.6)*16 = 185.6; FLOPs: (2000+185.6)*2 = 4371.2.
+    // Persistent CSA slots are 5,5,6,6,7 (mean 5.8), not selected topK.
+    // Shared KV vector has 2 dims * 2 bytes = 4 bytes per slot.
+    // Mean traffic: 2000 weights + (6+5.8+2.6)*4*2 requests = 2115.2 bytes.
     const hybridModel: ModelArch = {
       ...testInput.model,
       layers: 3,
@@ -216,7 +197,7 @@ describe('computeDecode', () => {
     const input = { ...testInput, model: hybridModel }
     const hybridMemory = computeMemory(input)
     const d = computeDecode(input, opPoint, hybridMemory)
-    expect(d.flopsPerStep).toBe(4194)
-    expect(d.bytesPerStep).toBe(2276)
+    expect(d.flopsPerStep).toBe(4371.2)
+    expect(d.bytesPerStep).toBe(2115.2)
   })
 })

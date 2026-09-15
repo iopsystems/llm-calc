@@ -1,7 +1,9 @@
 import type { CalcInput, AcceleratorOperatingPoint, MemoryResult, PerfTier, MultiDeviceConfig } from './types'
 import { roofline } from './roofline'
-import { attendedSeqlenSummedOverLayers, activeParams, attentionDim, linearAttentionFlopsPerToken, deltaAttentionFlopsPerToken, mambaFlopsPerToken } from './memory'
-import { commsBytesPerStep } from './parallelism'
+import { activeParams, linearAttentionFlopsPerToken, deltaAttentionFlopsPerToken, mambaFlopsPerToken } from './memory'
+import { commsBytesPerStep, activeParametersOnRank, expectedWeightParameters, parallelDegrees, validateParallelism } from './parallelism'
+import { prefillAttentionFlops } from './attention'
+import { bytesOf } from './dtypes'
 import { INTERCONNECTS } from '../data/interconnects'
 
 export function computePrefill(
@@ -14,13 +16,20 @@ export function computePrefill(
   const p = workload.promptTokens
   const multiDevice = multiDeviceOverride ?? input.multiDevice
 
-  const flops =
-    2 * activeParams(model) * p +
-    2 * p * attendedSeqlenSummedOverLayers(model, p) * attentionDim(model) +
-    p * linearAttentionFlopsPerToken(model) +
-    p * deltaAttentionFlopsPerToken(model) +
-    p * mambaFlopsPerToken(model)
-  const bytes = memory.weights + memory.activationsPeak
+  validateParallelism(multiDevice, model)
+  const { tp, ep } = parallelDegrees(multiDevice)
+  const attentionFlops = prefillAttentionFlops(model, p)
+  const recurrentFlops = p * (linearAttentionFlopsPerToken(model)
+    + deltaAttentionFlopsPerToken(model) + mambaFlopsPerToken(model))
+  // Prefill models one prompt. Concurrency is the decode batch size; memory
+  // capacity separately reserves activations for concurrent prompts.
+  const flops = 2 * activeParams(model) * p + attentionFlops + recurrentFlops
+  const activations = memory.activationsPeak / Math.max(1, workload.concurrency)
+  const bytes = expectedWeightParameters(model, p) * bytesOf(quant.weights) + activations
+  // PP stages execute sequentially for request latency; divide storage by PP,
+  // not the work along a request's full forward path.
+  const rankFlops = 2 * activeParametersOnRank(model, tp, ep) * p + (attentionFlops + recurrentFlops) / tp
+  const rankBytes = expectedWeightParameters(model, p, tp, ep) * bytesOf(quant.weights) + activations / tp
 
   const tflops = opPoint.tflops[quant.activations]
   if (tflops === undefined) {
@@ -30,7 +39,7 @@ export function computePrefill(
   let commsBytes: number | undefined = undefined
   let interconnectBwGBs: number | undefined = undefined
   if (multiDevice) {
-    const B = workload.promptTokens * workload.concurrency
+    const B = workload.promptTokens
     commsBytes = commsBytesPerStep(
       multiDevice.parallelism,
       multiDevice.parallelismDegrees,
@@ -43,8 +52,8 @@ export function computePrefill(
   }
 
   const { timeS, regime } = roofline({
-    flops, bytes, tflops, bwGBs: opPoint.hbmBandwidthGBs,
+    flops: rankFlops, bytes: rankBytes, tflops, bwGBs: opPoint.hbmBandwidthGBs,
     commsBytes, interconnectBwGBs
   })
-  return { flops, bytes, timeS, regime, ...(commsBytes !== undefined && { commsBytes }) }
+  return { flops, bytes, rankFlops, rankBytes, timeS, regime, ...(commsBytes !== undefined && { commsBytes }) }
 }

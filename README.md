@@ -97,19 +97,44 @@ type CalcInput = {
 }
 ```
 
-The math is honest roofline analysis:
+Runtime uses a roofline estimate: the maximum of compute time, HBM traffic
+time, and communication time. Rates are per device; work is evaluated on the
+most-loaded DP replica with ideal TP/EP balance, summed over sequential
+pipeline stages.
 
-| Phase   | Time                                                | Regime               |
-| ------- | --------------------------------------------------- | -------------------- |
-| Prefill | `max(prefill_flops / tflops, prefill_bytes / bw)`   | `compute` or `memory`|
-| Decode  | `max(decode_flops/step / tflops, decode_bytes / bw)`| `compute` or `memory`|
+- Prefill models one prompt. Attention counts both QK and AV products over
+  causal positions, capping sliding/sparse attention at each position.
+  MLA uses expanded prefill dimensions and absorbed latent decode dimensions.
+- Decode concurrency is the global request batch. Cache traffic averages
+  positions `prompt .. prompt + max(output, 1) - 1`; capacity reserves the
+  peak `prompt + output`. Sparse attention still reads the full stored cache
+  in this conservative traffic model.
+- GQA KV heads shard under TP; shared MLA latents, V4 KV vectors, and MSA index
+  keys replicate. DeltaNet recurrent state stays FP32 regardless of KV dtype.
+  Compressed caches allocate completed blocks. Pipeline storage assumes uniform
+  layers per stage.
+- TP, PP, EP, and DP are independent physical mesh axes. Their product cannot
+  exceed the device count. Defaults use TP and PP; EP is opt-in and shards only
+  routed experts. DP allocates whole requests to replicas.
+- MoE weight traffic uses the expected expert union under independent uniform
+  top-k routing: `shared + routed × (1 - (1 - k/E)^batch)`. Shared/routed pools
+  are inferred from total and active parameter counts, bounded for rounded
+  catalog values. EP runtime uses average expert work per rank, an ideal balance assumption
+  that can underestimate small-batch latency. Actual routing imbalance and
+  nonuniform popularity are omitted.
+- MTP speedup remains an **ideal ceiling** of `1 + mtp_depth`, assuming full
+  acceptance and no verification cost. Sparse index scoring, compressor work,
+  scheduling overhead, and speculative acceptance are not simulated.
 
-Prefill FLOPs include both the MLP term (`2·params·p`) and the attention
-quadratic (`2·layers·p²·hidden`) — kept separate so long-context behavior is
-visible. KV cache is GQA-aware (`2·layers·num_kv_heads·head_dim·bytes(kv_dtype)`).
-Per-component quantization: weights / KV / activations are independent dtype
-knobs. Activations dtype selects which `tflops` entry of the GPU operating
-point is used.
+Weights, KV, and activations have independent dtype knobs. Activation dtype
+selects the device's compute throughput. Capacity conservatively reserves
+activation space for concurrent prompts even though prefill latency models
+one prompt.
+
+Geometry references: [Qwen3.5-27B config](https://huggingface.co/Qwen/Qwen3.5-27B/raw/main/config.json),
+[Qwen3.5-35B-A3B config](https://huggingface.co/Qwen/Qwen3.5-35B-A3B/raw/main/config.json),
+[DeepSeek V3 MLA implementation](https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py),
+and [DeepSeek V4 attention implementation](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/blob/main/inference/model.py).
 
 ### Data model
 
