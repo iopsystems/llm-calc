@@ -1,6 +1,6 @@
 // Per-model geometry for the Info tab figure. Pure; every byte figure comes
 // from src/engine/memory.ts so the drawing cannot disagree with the calc.
-import type { ModelArch } from '../engine/types'
+import type { ModelArch, AttentionConfig } from '../engine/types'
 import { kvBytesPerTokenPerLayer } from '../engine/memory'
 import { bytesOf } from '../engine/dtypes'
 import { KV_REF_DTYPE } from './catalogMetrics'
@@ -159,5 +159,92 @@ export function lanesFor(m: ModelArch): Lane[] {
       const _exhaustive: never = att
       throw new Error(`lanesFor: unhandled attention variant ${(_exhaustive as { type: string }).type}`)
     }
+  }
+}
+
+export interface HeadGeometry {
+  kind: 'gqa' | 'latent' | 'state'
+  numHeads: number
+  numKvHeads: number
+  headDim: number
+  fullKvWidth?: number       // 'latent': what per-head K+V would be, in elements
+  latentWidth?: number       // 'latent': kvLoraRank + qkRopeHeadDim
+  state?: { heads: number; dim: number; inner: number }   // 'state': elements = heads × dim × inner
+}
+
+export function headsFor(m: ModelArch): HeadGeometry[] {
+  const base = { numHeads: m.numHeads, numKvHeads: m.numKvHeads, headDim: m.headDim }
+  const gqa: HeadGeometry = { kind: 'gqa', ...base }
+  const latent = (rank: number, rope: number): HeadGeometry =>
+    ({ kind: 'latent', ...base, fullKvWidth: m.numHeads * m.headDim * 2, latentWidth: rank + rope })
+  const state = (heads: number, dim: number, inner: number): HeadGeometry =>
+    ({ kind: 'state', ...base, state: { heads, dim, inner } })
+  const att = m.attention
+  switch (att.type) {
+    case 'full': case 'sliding': case 'hybrid': case 'partial':
+    case 'msa-hybrid': case 'csa-hca-hybrid':
+      return [gqa]
+    case 'mla': case 'mla-dsa':
+      return [latent(att.kvLoraRank, att.qkRopeHeadDim)]
+    case 'linear-mla-hybrid':
+      return [state(att.numLinearHeads, att.linearHeadDim, att.linearHeadDim), latent(att.kvLoraRank, att.qkRopeHeadDim)]
+    case 'delta-hybrid':
+      return [state(att.numDeltaNetHeads, att.deltaHeadDim, att.deltaHeadDim), gqa]
+    case 'mamba2-hybrid':
+      return [state(att.numMambaHeads, att.mambaHeadDim, att.ssmStateSize), gqa]
+    default: {
+      const _exhaustive: never = att
+      throw new Error(`headsFor: unhandled ${(_exhaustive as { type: string }).type}`)
+    }
+  }
+}
+
+const COUNTS_NOTE = 'Bar lengths are counts, not order.'
+const SPARSE_NOTE = 'A decode step streams the whole cache; selection lowers attention FLOPs, not bytes. The index branch that selects is not costed.'
+
+export function captionFor(type: AttentionConfig['type']): string {
+  switch (type) {
+    case 'mla-dsa': case 'csa-hca-hybrid':
+      return `${SPARSE_NOTE} ${COUNTS_NOTE}`
+    case 'msa-hybrid':
+      return `${SPARSE_NOTE} The shared index key is cached alongside K and V and is not sharded by TP. ${COUNTS_NOTE}`
+    case 'mamba2-hybrid':
+      return `Attention, Mamba2 and FFN are separate entries in the block count. SSM state is held in fp32. ${COUNTS_NOTE}`
+    case 'partial':
+      return `NAS pruning removed attention from the grey blocks; their FFN widths vary and are absorbed by the parameter count. ${COUNTS_NOTE}`
+    case 'full': case 'sliding': case 'hybrid': case 'mla':
+    case 'linear-mla-hybrid': case 'delta-hybrid':
+      return COUNTS_NOTE
+    default: {
+      const _exhaustive: never = type
+      throw new Error(`captionFor: unhandled ${_exhaustive as string}`)
+    }
+  }
+}
+
+export interface GeometryModel {
+  layers: number
+  maxContext: number
+  lanes: Lane[]
+  heads: HeadGeometry[]
+  ffn:
+    | { type: 'dense'; hiddenDim: number; intermediateDim: number }
+    | { type: 'moe'; routed: number; active: number; shared: number; activeRatio: number }
+  caption: string
+  schematicId: AttentionConfig['type']
+}
+
+export function geometryModel(m: ModelArch): GeometryModel {
+  const a = m.architecture
+  return {
+    layers: m.layers,
+    maxContext: m.maxContext,
+    lanes: lanesFor(m),
+    heads: headsFor(m),
+    ffn: a.type === 'moe'
+      ? { type: 'moe', routed: a.numExperts, active: a.numExpertsActive, shared: a.numSharedExperts, activeRatio: a.activeParamCount / m.paramCount }
+      : { type: 'dense', hiddenDim: m.hiddenDim, intermediateDim: m.intermediateDim },
+    caption: captionFor(m.attention.type),
+    schematicId: m.attention.type,
   }
 }

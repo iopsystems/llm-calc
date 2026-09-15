@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { MODELS } from '../../src/data'
-import { lanesFor, fmtBytes } from '../../src/ui/archGeometry'
+import { lanesFor, fmtBytes, headsFor, captionFor, geometryModel } from '../../src/ui/archGeometry'
+import { kvBytesPerTokenAtContext, fixedStateBytes, KV_REF_DTYPE } from '../../src/ui/catalogMetrics'
+import { kvBytesPerTokenPerLayer } from '../../src/engine/memory'
 
 const byId = (id: string) => {
   const m = MODELS.find(x => x.id === id)
@@ -165,6 +167,83 @@ describe('lanesFor — catalog-wide invariants', () => {
         expect(Number.isFinite(l.cache.bytesPerToken) && l.cache.bytesPerToken >= 0, `${m.id} ${l.kind}`).toBe(true)
         expect(Number.isFinite(l.cache.fixedBytes) && l.cache.fixedBytes >= 0, `${m.id} ${l.kind}`).toBe(true)
       }
+    }
+  })
+})
+
+describe('headsFor', () => {
+  it('GQA model: one gqa entry', () => {
+    expect(headsFor(byId('llama-3.1-8b'))).toEqual([
+      { kind: 'gqa', numHeads: 32, numKvHeads: 8, headDim: 128 },
+    ])
+  })
+  it('MLA model: latent entry with full-KV width vs latent width', () => {
+    expect(headsFor(byId('deepseek-v3'))).toEqual([
+      { kind: 'latent', numHeads: 128, numKvHeads: 128, headDim: 192, fullKvWidth: 128 * 192 * 2, latentWidth: 512 + 64 },
+    ])
+  })
+  it('delta-hybrid: state entry then gqa entry', () => {
+    expect(headsFor(byId('qwen3.5-397b-a17b'))).toEqual([
+      { kind: 'state', numHeads: 32, numKvHeads: 2, headDim: 256, state: { heads: 64, dim: 128, inner: 128 } },
+      { kind: 'gqa', numHeads: 32, numKvHeads: 2, headDim: 256 },
+    ])
+  })
+  it('mamba2-hybrid: state inner dim is the SSM state size', () => {
+    expect(headsFor(byId('nemotron-3-nano-30b-a3b'))[0].state).toEqual({ heads: 64, dim: 64, inner: 128 })
+  })
+  it('linear-mla-hybrid: state entry then latent entry', () => {
+    expect(headsFor(byId('kimi-linear')).map(h => h.kind)).toEqual(['state', 'latent'])
+  })
+})
+
+describe('captionFor', () => {
+  it('every caption ends with the counts-not-order sentence', () => {
+    for (const t of ['full', 'mla-dsa', 'mamba2-hybrid', 'partial'] as const) {
+      expect(captionFor(t).endsWith('Bar lengths are counts, not order.')).toBe(true)
+    }
+  })
+  it('sparse variants state the whole-cache-streamed simplification', () => {
+    for (const t of ['mla-dsa', 'msa-hybrid', 'csa-hca-hybrid'] as const) {
+      expect(captionFor(t)).toContain('A decode step streams the whole cache; selection lowers attention FLOPs, not bytes.')
+    }
+    expect(captionFor('msa-hybrid')).toContain('not sharded by TP')
+    expect(captionFor('mla')).not.toContain('streams the whole cache')
+  })
+})
+
+describe('geometryModel', () => {
+  it('dense FFN carries hidden and intermediate dims', () => {
+    const g = geometryModel(byId('llama-3.1-8b'))
+    expect(g.ffn).toEqual({ type: 'dense', hiddenDim: 4096, intermediateDim: 14336 })
+    expect(g.schematicId).toBe('full')
+    expect(g.layers).toBe(32)
+    expect(g.maxContext).toBe(131072)
+  })
+  it('MoE FFN carries routed/active/shared and the active ratio', () => {
+    const g = geometryModel(byId('deepseek-v3'))
+    expect(g.ffn).toEqual({ type: 'moe', routed: 256, active: 8, shared: 1, activeRatio: 37e9 / 671e9 })
+  })
+
+  it('lane bytes agree with the engine at max context for every catalog model', () => {
+    for (const m of MODELS) {
+      const g = geometryModel(m)
+      const S = m.maxContext
+      const p = kvBytesPerTokenPerLayer(m, KV_REF_DTYPE)
+      let sum = 0
+      let fixed = 0
+      for (const l of g.lanes) {
+        fixed += l.count * l.cache.fixedBytes
+        if (l.cache.glyph === 'state' || l.cache.glyph === 'none') continue
+        if (l.cache.glyph === 'kvcomp') {
+          sum += l.count * (l.cache.bytesPerToken + p * Math.min(l.reach.local!, S) / S)
+        } else if (l.reach.glyph === 'window') {
+          sum += l.count * l.cache.bytesPerToken * Math.min(l.reach.tokens!, S) / S
+        } else {
+          sum += l.count * l.cache.bytesPerToken
+        }
+      }
+      expect(sum, m.id).toBeCloseTo(kvBytesPerTokenAtContext(m, S), 6)
+      expect(fixed, m.id).toBe(fixedStateBytes(m))
     }
   })
 })
