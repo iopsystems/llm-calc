@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeMemory } from '../../src/engine/memory'
+import { computeMemory, attendedSeqlenSummedOverLayers } from '../../src/engine/memory'
 import { testInput } from '../fixtures'
 import type { ModelArch } from '../../src/engine/types'
 
@@ -212,6 +212,39 @@ describe('computeMemory', () => {
     const m = computeMemory(input)
     expect(m.kvCachePerRequest).toBe(138)
     expect(m.kvCacheTotal).toBe(276)
+  })
+
+  it('msa-hybrid: full KV storage, but compute attention capped at topKBlocks × blockSize on sparse layers', () => {
+    // testModel base: layers=2, kvHeads=1, headDim=2, fp16; prompt+output=15.
+    // msa-hybrid with 1 full + 1 sparse, blockSize=2, topKBlocks=3 → cap 6 tokens.
+    // Storage (forKv=true): both layers cache full seq → 2 × 15 × 8 = 240.
+    const msaModel: ModelArch = {
+      ...testInput.model,
+      attention: {
+        type: 'msa-hybrid',
+        numFullLayers: 1, numSparseLayers: 1,
+        blockSize: 2, topKBlocks: 3
+      }
+    }
+    const input = { ...testInput, model: msaModel }
+    const m = computeMemory(input)
+    expect(m.kvCachePerRequest).toBe(240)
+    // Compute attention: 1 × 15 + 1 × min(15, 6) = 21
+    expect(attendedSeqlenSummedOverLayers(msaModel, 15)).toBe(21)
+    // Below the cap, sparse behaves as full: 1 × 4 + 1 × min(4, 6) = 8
+    expect(attendedSeqlenSummedOverLayers(msaModel, 4)).toBe(8)
+  })
+
+  it('msa-hybrid throws when layer counts do not sum to model.layers', () => {
+    const badModel: ModelArch = {
+      ...testInput.model,
+      attention: {
+        type: 'msa-hybrid',
+        numFullLayers: 1, numSparseLayers: 3,
+        blockSize: 2, topKBlocks: 3
+      }
+    }
+    expect(() => attendedSeqlenSummedOverLayers(badModel, 15)).toThrow(/must sum/)
   })
 
   describe('perRank', () => {

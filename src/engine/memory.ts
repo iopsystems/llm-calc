@@ -105,6 +105,17 @@ export function attendedSeqlenSummedOverLayers(model: ModelArch, seqlen: number,
     // NAS-pruned blocks have no attention at all.
     return att.numFullLayers * seqlen
   }
+  if (att.type === 'msa-hybrid') {
+    if (att.numFullLayers + att.numSparseLayers !== model.layers) {
+      throw new Error(
+        `msa-hybrid layer counts must sum to model.layers: ` +
+        `${att.numFullLayers} + ${att.numSparseLayers} ≠ ${model.layers}`
+      )
+    }
+    // Sparse layers cache full KV; top-k block selection only caps compute.
+    const sparseCount = forKv ? seqlen : Math.min(seqlen, att.topKBlocks * att.blockSize)
+    return att.numFullLayers * seqlen + att.numSparseLayers * sparseCount
+  }
   if (att.type === 'mla-dsa') return model.layers * (forKv ? seqlen : Math.min(seqlen, att.topK))
   const perLayer = att.type === 'sliding' ? Math.min(seqlen, att.window) : seqlen
   return model.layers * perLayer

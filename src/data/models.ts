@@ -900,6 +900,37 @@ export const MODELS: ModelArch[] = [
       activeParamCount: 10_000_000_000
     }
   },
+  // MiniMax M3 (MiniMaxAI/MiniMax-M3, created 2026-06, minimax-community license):
+  // first MSA model — blockwise top-k sparse GQA (arXiv 2606.13392). Config
+  // sparse_attention_freq: 3 full + 57 sparse; deployed top-16 blocks × 128
+  // block size = 2048 attended tokens per sparse layer. MoE mirrors the split
+  // (3 dense + 57 MoE, first_k dense absorbed by paramCount). Card: 428B total /
+  // 23B activated, bf16, 1M context. intermediateDim = moe_intermediate_size
+  // (3072); the 12288-wide dense-layer FFN is absorbed by paramCount.
+  // numNextnLayers 7 from config num_mtp_modules (one layer each), following
+  // the M2.5/M2.7 precedent of reading MTP depth off num_mtp_modules.
+  {
+    id: 'minimax-m3', name: 'MiniMax M3', family: 'minimax-m3',
+    publisher: 'MiniMax', releaseDate: '2026-06',
+    nativeDtype: 'bf16',
+    layers: 60, hiddenDim: 6144, intermediateDim: 3072,
+    numHeads: 64, numKvHeads: 4, headDim: 128, vocabSize: 200064,
+    paramCount: 428_000_000_000,
+    maxContext: 1048576,
+    numNextnLayers: 7,
+    attention: {
+      type: 'msa-hybrid',
+      numFullLayers: 3, numSparseLayers: 57,
+      blockSize: 128, topKBlocks: 16
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 128,
+      numExpertsActive: 4,
+      numSharedExperts: 1,
+      activeParamCount: 23_000_000_000
+    }
+  },
   // === OpenAI gpt-oss ===
   // Alternating sliding(128)/full attention 1:1, MoE with top-4 routing.
   // Ships mxfp4 MoE weights (attention/embeddings stay bf16) → nativeDtype fp4.

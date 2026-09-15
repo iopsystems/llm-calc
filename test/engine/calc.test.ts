@@ -1483,6 +1483,42 @@ describe('calculate — 2026-H2 additions (Kimi K3, Qwen3.8, GLM-5.3)', () => {
   })
 })
 
+describe('calculate — MiniMax M3 (MSA blockwise top-k sparse) integration', () => {
+  const h100 = ACCELERATORS.find(a => a.id === 'h100')!
+  const m3 = MODELS.find(m => m.id === 'minimax-m3')!
+  const quant = { weights: 'fp16', kv: 'fp16', activations: 'fp16' } as const
+
+  it('KV storage at 128k is full GQA on all 60 layers — sparsity saves compute, not memory', () => {
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: m3, quant,
+      workload: { promptTokens: 131072, outputTokens: 0, concurrency: 1 }
+    })
+    // 60 layers × 2(K+V) × 4 kvHeads × 128 headDim × 2B × seq
+    expect(r.memory.kvCachePerRequest).toBe(60 * 2 * 4 * 128 * 2 * 131072)
+  })
+
+  it('decode FLOPs at 128k: 57 sparse layers capped at 16 blocks × 128 = 2048 tokens', () => {
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: m3, quant,
+      workload: { promptTokens: 131072, outputTokens: 0, concurrency: 1 }
+    })
+    const attended = 3 * 131072 + 57 * 2048
+    const attnDim = 64 * 128
+    expect(r.perf['peak'].decode.flopsPerStep)
+      .toBe(2 * 23_000_000_000 + 2 * attended * attnDim)
+    // vs hypothetical all-full 60 × 131072: attention FLOPs cut > 15×
+    expect((60 * 131072) / attended).toBeGreaterThan(15)
+  })
+
+  it('catalog fields: 428B/A23B bf16, 1M ctx, MTP modules 7 per config', () => {
+    expect(m3.paramCount).toBe(428_000_000_000)
+    expect(m3.architecture.type === 'moe' && m3.architecture.activeParamCount).toBe(23_000_000_000)
+    expect(m3.nativeDtype).toBe('bf16')
+    expect(m3.maxContext).toBe(1048576)
+    expect(m3.numNextnLayers).toBe(7)
+  })
+})
+
 describe('models data — every entry produces finite results', () => {
   const h100 = ACCELERATORS.find(a => a.id === 'h100')!
 
