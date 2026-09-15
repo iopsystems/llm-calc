@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "check:skill-sync": "node .claude/hooks/check-skill-sync.mjs",
     "cli": "tsx src/cli.ts",
+    "render:figures": "tsx scripts/render-figures.ts",
     "deploy": "vite build && wrangler deploy",
     "deploy:dry": "vite build && wrangler deploy --dry-run"
   },
