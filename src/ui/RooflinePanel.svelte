@@ -83,14 +83,18 @@
       roofs.push({ tier, ai: opRidge, perf: opFlops })
       roofs.push({ tier, ai: 1e6,    perf: opFlops })
 
-      const prefAi = p.prefill.flops / p.prefill.bytes
-      const prefPerf = p.prefill.flops / p.prefill.timeS
-      const decAi = p.decode.flopsPerStep / p.decode.bytesPerStep
-      const decPerf = p.decode.flopsPerStep / p.decode.timePerTokenS
+      const prefFlops = p.prefill.rankFlops ?? p.prefill.flops
+      const prefBytes = p.prefill.rankBytes ?? p.prefill.bytes
+      const decFlops = p.decode.rankFlops ?? p.decode.flopsPerStep
+      const decBytes = p.decode.rankBytes ?? p.decode.bytesPerStep
+      const prefAi = prefFlops / prefBytes
+      const prefPerf = prefFlops / p.prefill.timeS
+      const decAi = decFlops / decBytes
+      const decPerf = decFlops / p.decode.timePerTokenS
 
       const mtpFactor = 1 + $input.model.numNextnLayers
       const decNote = mtpFactor > 1
-        ? `MTP ×${mtpFactor} (${mtpFactor} tokens per forward pass)`
+        ? `Ideal MTP ceiling ×${mtpFactor}: full acceptance, verification cost excluded`
         : undefined
 
       points.push({ tier, phase: 'prefill', ai: prefAi, perf: prefPerf, regime: p.prefill.regime })
@@ -159,9 +163,9 @@
     const p = Object.values($result.perf)[0]
     if (!p) return []
     return commsCeilings([
-      { phase: 'prefill', flops: p.prefill.flops, hbmBytes: p.prefill.bytes,
+      { phase: 'prefill', flops: p.prefill.rankFlops ?? p.prefill.flops, hbmBytes: p.prefill.rankBytes ?? p.prefill.bytes,
         commsBytes: p.prefill.commsBytes },
-      { phase: 'decode', flops: p.decode.flopsPerStep, hbmBytes: p.decode.bytesPerStep,
+      { phase: 'decode', flops: p.decode.rankFlops ?? p.decode.flopsPerStep, hbmBytes: p.decode.rankBytes ?? p.decode.bytesPerStep,
         commsBytes: p.decode.commsBytes }
     ], bwBs)
   })

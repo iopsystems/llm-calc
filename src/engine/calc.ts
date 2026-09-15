@@ -6,6 +6,7 @@ import { computeDecode } from './decode'
 import { DerivationBuilder } from './derivation'
 import { INTERCONNECTS } from '../data/interconnects'
 import { pairOpPoints } from './opPoints'
+import { validateParallelism } from './parallelism'
 
 // Derivation-display formula for the kv-per-token row. Must mirror
 // kvBytesPerTokenPerLayer × attendedSeqlenSummedOverLayers in memory.ts: the
@@ -27,6 +28,8 @@ function kvPerTokenExpression(model: ModelArch): string {
 }
 
 export function calculate(input: CalcInput): CalcResult {
+  validateParallelism(input.multiDevice, input.model)
+  validateParallelism(input.decodeMultiDevice, input.model)
   // Resolve both sides. Decode side falls back to prefill when fields absent.
   const prefillVariant = input.accelerator.variants.find(v => v.id === input.acceleratorVariantId)
   if (!prefillVariant) {
@@ -120,7 +123,7 @@ export function calculate(input: CalcInput): CalcResult {
     // multiDevice to the prefill cluster's parallelism config.
     let firstStepOnPrefillS = decode.timePerTokenS  // fallback covers symmetric case
     if (kvTransferS > 0 && firstTokenOnPrefill) {
-      const onPrefill = computeDecode(input, pair.prefillOp, memory, input.multiDevice)
+      const onPrefill = computeDecode(input, pair.prefillOp, memory, input.multiDevice ?? null)
       firstStepOnPrefillS = onPrefill.timePerTokenS
     }
 
@@ -150,23 +153,27 @@ export function calculate(input: CalcInput): CalcResult {
     if (!volumeRowsAdded) {
       volumeRowsAdded = true
       d.add('prefill flops', '2 × active_params × prompt + attention + state terms', prefill.flops, 'FLOPs')
-      d.add('prefill bytes (hbm)', 'weights + prefill_activations', prefill.bytes, 'bytes')
+      d.add('prefill bytes (hbm)', 'expected prompt expert union × bytes(weight_dtype) + prefill_activations ÷ concurrency', prefill.bytes, 'bytes')
       if (prefill.commsBytes !== undefined) {
         d.add(
           'prefill comms bytes',
-          'TP all-reduce + PP sends + EP all-to-all volume, B = prompt × concurrency',
+          'TP all-reduce + PP sends + EP all-to-all volume, B = prompt',
           prefill.commsBytes, 'bytes'
         )
       }
       d.add('decode flops per step', '(2 × active_params + attention + state terms) × concurrency', decode.flopsPerStep, 'FLOPs')
-      d.add('decode bytes per step', 'active_params × bytes(weight_dtype) + kv_total + state write-back', decode.bytesPerStep, 'bytes')
+      d.add('decode bytes per step', 'sum of replica expert unions × bytes(weight_dtype) + mean cache reads + state write-back', decode.bytesPerStep, 'bytes')
       if (decode.commsBytes !== undefined) {
         d.add(
           'decode comms bytes',
-          'TP all-reduce + PP sends + EP all-to-all volume, B = concurrency',
+          'TP all-reduce + PP sends + EP all-to-all volume, B = ceil(concurrency ÷ DP)',
           decode.commsBytes, 'bytes'
         )
       }
+      d.add('prefill rank flops', 'ideal balanced TP/EP work summed over sequential PP stages', prefill.rankFlops!, 'FLOPs')
+      d.add('prefill rank bytes', 'rank prompt expert union + rank prompt activations', prefill.rankBytes!, 'bytes')
+      d.add('decode rank flops', 'most-loaded DP replica, ideal balanced TP/EP work over sequential PP stages', decode.rankFlops!, 'FLOPs')
+      d.add('decode rank bytes', 'ideal EP-balanced expert union + mean rank cache reads and state writes', decode.rankBytes!, 'bytes')
       // The time formulas divide comms bytes by this; surface it so the
       // drawer is self-contained (tflops/hbm_bw live on the SKU spec sheet,
       // but the fabric rate appears nowhere else in the UI).
@@ -182,8 +189,8 @@ export function calculate(input: CalcInput): CalcResult {
       }
     }
     const prefillTimeExpr = prefill.commsBytes !== undefined
-      ? 'max(prefill_flops ÷ tflops, prefill_bytes ÷ hbm_bw, prefill_comms_bytes ÷ interconnect_bw)'
-      : 'max(prefill_flops ÷ tflops, prefill_bytes ÷ hbm_bw)'
+      ? 'max(prefill_rank_flops ÷ tflops, prefill_rank_bytes ÷ hbm_bw, prefill_comms_bytes ÷ interconnect_bw)'
+      : 'max(prefill_rank_flops ÷ tflops, prefill_rank_bytes ÷ hbm_bw)'
     d.add(`prefill time @ ${pair.id}`, prefillTimeExpr, prefill.timeS, 's')
     if (kvTransferS > 0) {
       d.add(
@@ -195,9 +202,9 @@ export function calculate(input: CalcInput): CalcResult {
       )
     }
     const decodeTimeExpr = (decode.commsBytes !== undefined
-      ? 'max(decode_flops ÷ tflops, decode_bytes ÷ hbm_bw, decode_comms_bytes ÷ interconnect_bw)'
-      : 'max(decode_flops ÷ tflops, decode_bytes ÷ hbm_bw)')
-      + (input.model.numNextnLayers > 0 ? ' ÷ (1 + mtp_depth)' : '')
+      ? 'max(decode_rank_flops ÷ tflops, decode_rank_bytes ÷ hbm_bw, decode_comms_bytes ÷ interconnect_bw)'
+      : 'max(decode_rank_flops ÷ tflops, decode_rank_bytes ÷ hbm_bw)')
+      + (input.model.numNextnLayers > 0 ? ' ÷ (1 + mtp_depth), ideal ceiling: full acceptance, no verification cost' : '')
     d.add(`decode time per token @ ${pair.id}`, decodeTimeExpr, decode.timePerTokenS, 's')
   }
 

@@ -1,5 +1,49 @@
-import type { Dtype, ModelArch, MultiAcceleratorSystem, ParallelismMode } from './types'
+import type { Dtype, ModelArch, MultiAcceleratorSystem, MultiDeviceConfig, ParallelismMode } from './types'
 import { bytesOf } from './dtypes'
+
+// Effective shared/routed pools inferred from catalog total and per-token active
+// counts, assuming equally sized routed experts. Bounds absorb rounded card totals.
+export function parameterPools(model: ModelArch): { shared: number; routed: number; fraction: number } {
+  if (model.architecture.type !== 'moe') return { shared: model.paramCount, routed: 0, fraction: 0 }
+  const a = model.architecture
+  const fraction = Math.min(1, a.numExpertsActive / a.numExperts)
+  const shared = fraction >= 1 ? model.paramCount
+    : Math.min(model.paramCount, Math.max(0, (a.activeParamCount - fraction * model.paramCount) / (1 - fraction)))
+  return { shared, routed: model.paramCount - shared, fraction }
+}
+
+// EP runtime assumes ideal balance (average routed work per rank).
+// Small batches can be slower when selected experts concentrate on one rank.
+export function activeParametersOnRank(model: ModelArch, tp = 1, ep = 1): number {
+  const { shared, routed, fraction } = parameterPools(model)
+  return (shared + routed * fraction / ep) / tp
+}
+
+// Independent uniform top-k routing: expected union of experts across a batch.
+// Shared parameters are read once per replica; EP distributes only routed experts.
+export function expectedWeightParameters(model: ModelArch, batch: number, tp = 1, ep = 1): number {
+  if (batch <= 0) return 0
+  const { shared, routed, fraction } = parameterPools(model)
+  const coverage = fraction >= 1 ? 1 : -Math.expm1(batch * Math.log1p(-fraction))
+  return (shared + routed * coverage / ep) / tp
+}
+
+export function parallelDegrees(config?: MultiDeviceConfig): { tp: number; pp: number; ep: number; dp: number } {
+  const degree = (id: ParallelismMode['id']) => config?.parallelism.includes(id) ? (config.parallelismDegrees[id] ?? 1) : 1
+  return { tp: degree('tp'), pp: degree('pp'), ep: degree('ep'), dp: degree('dp') }
+}
+
+export function validateParallelism(config: MultiDeviceConfig | undefined, model: ModelArch): void {
+  if (!config) return
+  const { tp, pp, ep, dp } = parallelDegrees(config)
+  if (![tp, pp, ep, dp].every(n => Number.isInteger(n) && n >= 1)) {
+    throw new Error('Parallelism degrees must be positive integer ranks')
+  }
+  if (tp * pp * ep * dp > config.system.accelerator.count) {
+    throw new Error(`Parallelism requires ${tp * pp * ep * dp} ranks but the system has ${config.system.accelerator.count} physical devices`)
+  }
+  if (ep > 1 && model.architecture.type !== 'moe') throw new Error('Expert parallelism requires an MoE model')
+}
 
 export interface RankDivisors {
   weights: number
@@ -18,9 +62,11 @@ export function perRankMemoryDivisors(
   const ep = parallelism.includes('ep') ? (degrees.ep ?? 1) : 1
   const dp = parallelism.includes('dp') ? (degrees.dp ?? 1) : 1
 
-  // Weights: TP shards weight matrices, PP shards layers, EP shards routed-expert
-  // weights (first-cut approximates as full N divisor for MoE), DP replicates.
-  const weightsDivisor = tp * pp * (model.architecture.type === 'moe' && ep > 1 ? ep : 1)
+  // TP and EP are independent physical mesh axes. Shared weights replicate
+  // across EP ranks; routed weights alone receive the EP divisor.
+  const { shared, routed } = parameterPools(model)
+  const weightsDivisor = model.paramCount > 0
+    ? model.paramCount / ((shared + routed / ep) / (tp * pp)) : tp * pp
 
   // KV cache: TP shards heads (capped at numKvHeads), PP per-stage, EP/DP replicated.
   // MLA-family exception: the cache is one shared compressed latent per token
@@ -28,7 +74,7 @@ export function perRankMemoryDivisors(
   // full latent, which is why MLA deployments serve attention data-parallel.
   // PP still divides (each stage caches only its own layers' latents).
   const att = model.attention.type
-  const mlaKv = att === 'mla' || att === 'mla-dsa' || att === 'linear-mla-hybrid'
+  const mlaKv = att === 'mla' || att === 'mla-dsa' || att === 'linear-mla-hybrid' || att === 'csa-hca-hybrid'
   const kvShard = mlaKv ? 1 : Math.min(tp, model.numKvHeads)
   const kvDivisor = kvShard * pp
 
@@ -85,10 +131,10 @@ export function defaultParallelism(
   model: ModelArch
 ): ParallelismConfig {
   const N = system.accelerator.count
-  const isMoE = model.architecture.type === 'moe'
-
-  const tp = Math.min(N, 8)
-  const pp = N > 8 ? Math.ceil(N / 8) : 1
+  // Use a valid TP×PP mesh by default. EP is an explicit independent axis.
+  let tp = Math.min(N, 8, model.numHeads)
+  while (N % tp !== 0 || model.numHeads % tp !== 0) tp--
+  const pp = N / tp
 
   const parallelism: ParallelismMode['id'][] = ['tp']
   const degrees: Partial<Record<ParallelismMode['id'], number>> = { tp }
@@ -96,10 +142,6 @@ export function defaultParallelism(
   if (pp > 1) {
     parallelism.push('pp')
     degrees.pp = pp
-  }
-  if (isMoE) {
-    parallelism.push('ep')
-    degrees.ep = N
   }
   return { parallelism, parallelismDegrees: degrees }
 }

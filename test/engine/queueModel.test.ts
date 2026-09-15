@@ -3,6 +3,8 @@ import { computeNMax, loadCurve } from '../../src/engine/queueModel'
 import { calculate } from '../../src/engine'
 import { ACCELERATORS, MODELS } from '../../src/data'
 import type { CalcInput } from '../../src/engine/types'
+import { computeMemory } from '../../src/engine/memory'
+import { testInput } from '../fixtures'
 
 function inputFor(acceleratorId: string, variantId: string, modelId: string): CalcInput {
   const accelerator = ACCELERATORS.find(a => a.id === acceleratorId)!
@@ -209,5 +211,46 @@ describe('computeNMax', () => {
     const input = inputFor('h100', 'sxm-80', 'llama-3.3-70b')  // 80 GB chip, 140 GB weights
     expect(computeNMax(input).nMax).toBe(0)
     expect(computeNMax(input, 'prefill').nMax).toBe(0)
+  })
+})
+
+describe('DP capacity and isolated prefill probes', () => {
+  it.each(['prefill', 'decode'] as const)('DP %s ceiling matches the exact memory-fit boundary', side => {
+    const input: CalcInput = { ...testInput,
+      accelerator: { ...testInput.accelerator, variants: [{ ...testInput.accelerator.variants[0], hbmCapacityGB: 3000 / 1024 ** 3 }] },
+      multiDevice: { system: {} as never, parallelism: ['dp'], parallelismDegrees: { dp: 2 } },
+    }
+    // 2000 weight bytes per replica leave 1000. Each request needs 240 KV
+    // plus 480 prefill or 48 decode activation bytes. Two independent replicas.
+    const nMax = computeNMax(input, side).nMax
+    expect(nMax).toBe(side === 'prefill' ? 2 : 6)
+    const at = computeMemory({ ...input, workload: { ...input.workload, concurrency: nMax } })
+    const over = computeMemory({ ...input, workload: { ...input.workload, concurrency: nMax + 1 } })
+    expect((side === 'prefill' ? at.prefillSide : at.decodeSide).perRank!.fits).toBe(true)
+    expect((side === 'prefill' ? over.prefillSide : over.decodeSide).perRank!.fits).toBe(false)
+  })
+
+  it('prefill probe remains one request when caller supplies a larger decode batch', () => {
+    const accelerator = { ...testInput.accelerator, variants: [{ ...testInput.accelerator.variants[0],
+      operatingPoints: [{ id: 'fast', label: 'fast', tflops: { fp16: 1000 }, hbmBandwidthGBs: 1 }],
+    }] }
+    const input = { ...testInput, accelerator }
+    expect(loadCurve(input, [1])[0].prefillS).toBe(loadCurve({ ...input,
+      workload: { ...input.workload, concurrency: 1 },
+    }, [1])[0].prefillS)
+  })
+
+  it('first-token overlap runs on single-device prefill even with TP decode', () => {
+    const input = inputFor('h200', 'sxm-141', 'llama-3.3-70b')
+    input.disaggKvTransferFabricId = 'ib-ndr'
+    const decodeMultiDevice = {
+      system: { accelerator: { count: 8 }, interconnectId: 'nvlink-4' } as never,
+      parallelism: ['tp' as const], parallelismDegrees: { tp: 8 },
+    }
+    const single = loadCurve(input, [1])[0]
+    const split = loadCurve({ ...input, decodeMultiDevice }, [1])[0]
+    expect(single.ttftMode).toBe('overlap')
+    expect(split.ttftS).toBe(single.ttftS)
+    expect(split.tpotS).toBeLessThan(single.tpotS)
   })
 })

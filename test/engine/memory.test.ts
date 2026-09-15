@@ -193,9 +193,9 @@ describe('computeMemory', () => {
     // csa-hca-hybrid with layers=3 (1 sliding + 1 CSA + 1 HCA):
     //   slidingWindow=2, csaCompressionM=2, csaTopK=3, hcaCompressionM=4
     // attendedSeqlen(forKv=true) =
-    //   1 × min(15, 2) + 1 × (15/2 + 2) + 1 × (15/4 + 2) = 2 + 9.5 + 5.75 = 17.25
-    // kvBytesPerTokenPerLayer = 2 × 1 × 2 × 2 (fp16) = 8
-    // kvCachePerRequest = 8 × 17.25 = 138
+    //   1 × min(15, 2) + 1 × (floor(15/2) + 2) + 1 × (floor(15/4) + 2) = 16
+    // kvBytesPerTokenPerLayer = 2 dim × 2 bytes (fp16) = 4 (shared K/V)
+    // kvCachePerRequest = 4 × 16 = 64
     const hybridModel: ModelArch = {
       ...testInput.model,
       layers: 3,
@@ -210,8 +210,8 @@ describe('computeMemory', () => {
     }
     const input = { ...testInput, model: hybridModel }
     const m = computeMemory(input)
-    expect(m.kvCachePerRequest).toBe(138)
-    expect(m.kvCacheTotal).toBe(276)
+    expect(m.kvCachePerRequest).toBe(64)
+    expect(m.kvCacheTotal).toBe(128)
   })
 
   it('msa-hybrid: full KV storage, but compute attention capped at topKBlocks × blockSize on sparse layers', () => {
@@ -290,4 +290,15 @@ describe('computeMemory', () => {
       expect(pr.weights + pr.kvCacheTotal + pr.activationsPeak).toBe(pr.total)
     })
   })
+})
+
+
+it('DP activation capacity uses whole requests on the most-loaded replica', () => {
+  const input = { ...testInput, workload: { ...testInput.workload, concurrency: 3 },
+    multiDevice: { system: {} as never, parallelism: ['dp' as const], parallelismDegrees: { dp: 2 } },
+  }
+  const memory = computeMemory(input)
+  // Three requests split 2+1: rank peak reserves two activation sets.
+  expect(memory.prefillSide.perRank!.activations).toBe(960)
+  expect(memory.decodeSide.perRank!.activations).toBe(96)
 })

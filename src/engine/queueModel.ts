@@ -4,6 +4,7 @@ import { computePrefill } from './prefill'
 import { computeDecode } from './decode'
 import { INTERCONNECTS } from '../data/interconnects'
 import { pairOpPoints } from './opPoints'
+import { parallelDegrees } from './parallelism'
 
 export interface NMaxResult {
   nMax: number
@@ -40,7 +41,11 @@ export function computeNMax(input: CalcInput, side: 'prefill' | 'decode' = 'deco
   const perReqBytes = perReqKvBytes + perReqActBytes
   if (perReqBytes <= 0) return { nMax: 0, boundBy: 'weights' }
 
-  const nMax = Math.floor(free / perReqBytes)
+  // The concurrency-one probe reserves one whole request on the busiest
+  // replica. Sum the independently usable capacities of all DP replicas.
+  const config = side === 'prefill' ? input.multiDevice : input.decodeMultiDevice ?? input.multiDevice
+  const { dp } = parallelDegrees(config)
+  const nMax = Math.floor(free / perReqBytes) * dp
   return { nMax: Math.max(0, nMax), boundBy: 'kv' }
 }
 
@@ -104,8 +109,9 @@ export function loadCurve(input: CalcInput, ns: number[]): LoadPoint[] {
   const pair = pairs[0]  // v1: use the first (canonical) op-point pair
 
   // prefillS and kvTransferS are independent of N (per-request, not per-batch).
-  const probeMem = computeMemory({ ...input, workload: { ...input.workload, concurrency: 1 } })
-  const prefillS = computePrefill(input, pair.prefillOp, probeMem).timeS
+  const probeInput1 = { ...input, workload: { ...input.workload, concurrency: 1 } }
+  const probeMem = computeMemory(probeInput1)
+  const prefillS = computePrefill(probeInput1, pair.prefillOp, probeMem).timeS
 
   let kvTransferS = 0
   if (input.disaggKvTransferFabricId) {
@@ -120,8 +126,7 @@ export function loadCurve(input: CalcInput, ns: number[]): LoadPoint[] {
   // TTFT). Computed at batch=1 — at TTFT time only the just-arrived request
   // is decoding on the prefill cluster. Reuses the existing probeMem (same
   // concurrency=1 probe). Mirrors calc.ts path. N-independent; computed once.
-  const probeInput1 = { ...input, workload: { ...input.workload, concurrency: 1 } }
-  const decodeOnPrefill1 = computeDecode(probeInput1, pair.prefillOp, probeMem, input.multiDevice)
+  const decodeOnPrefill1 = computeDecode(probeInput1, pair.prefillOp, probeMem, input.multiDevice ?? null)
   const firstStepOnPrefillS = decodeOnPrefill1.timePerTokenS
 
   const outputTokens = input.workload.outputTokens
