@@ -8,9 +8,14 @@ import MlaSchematic from './MlaSchematic.svelte'
 import MlaDsaSchematic from './MlaDsaSchematic.svelte'
 import MsaSchematic from './MsaSchematic.svelte'
 import CsaHcaSchematic from './CsaHcaSchematic.svelte'
+import LinearMlaSchematic from './LinearMlaSchematic.svelte'
+import DeltaSchematic from './DeltaSchematic.svelte'
+import Mamba2Schematic from './Mamba2Schematic.svelte'
+import DenseFfnSchematic from './DenseFfnSchematic.svelte'
+import MoeSchematic from './MoeSchematic.svelte'
 
-// Partial until Task 12 adds the remaining drawings and tightens this to Record.
-export const SCHEMATIC_COMPONENTS: Partial<Record<SchematicId, Component>> = {
+// Record, not Partial: a new discriminant without a drawing fails `npm run check`.
+export const SCHEMATIC_COMPONENTS: Record<SchematicId, Component> = {
   'full': FullSchematic,
   'sliding': SlidingSchematic,
   'hybrid': HybridSchematic,
@@ -19,4 +24,9 @@ export const SCHEMATIC_COMPONENTS: Partial<Record<SchematicId, Component>> = {
   'mla-dsa': MlaDsaSchematic,
   'msa-hybrid': MsaSchematic,
   'csa-hca-hybrid': CsaHcaSchematic,
+  'linear-mla-hybrid': LinearMlaSchematic,
+  'delta-hybrid': DeltaSchematic,
+  'mamba2-hybrid': Mamba2Schematic,
+  'dense': DenseFfnSchematic,
+  'moe': MoeSchematic,
 }
