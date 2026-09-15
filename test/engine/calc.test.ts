@@ -1404,6 +1404,85 @@ describe('derivation — formulas match what the engine computed', () => {
   })
 })
 
+describe('calculate — 2026-H2 additions (Kimi K3, Qwen3.8, GLM-5.3)', () => {
+  const h100 = ACCELERATORS.find(a => a.id === 'h100')!
+  const quant = { weights: 'fp16', kv: 'fp16', activations: 'fp16' } as const
+
+  it('Kimi K3 at 128k: KV = 24 MLA layers + 69 KDA state layers', () => {
+    const k3 = MODELS.find(m => m.id === 'kimi-k3')!
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: k3, quant,
+      workload: { promptTokens: 131072, outputTokens: 0, concurrency: 1 }
+    })
+    // MLA: 24 × (kv_lora 512 + rope 64) × 2B × seq; KDA: 69 × 96 heads × 128² × 2B
+    const mlaKv = 24 * (512 + 64) * 2 * 131072
+    const kdaState = 69 * 96 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(mlaKv + kdaState)
+  })
+
+  it('Kimi K3 ships mxfp4 QAT weights at 1M context; decode reads 104B active', () => {
+    const k3 = MODELS.find(m => m.id === 'kimi-k3')!
+    expect(k3.nativeDtype).toBe('fp4')
+    expect(k3.maxContext).toBe(1048576)
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: k3, quant,
+      workload: { promptTokens: 2048, outputTokens: 512, concurrency: 1 }
+    })
+    const activeBytes = 104_000_000_000 * 2
+    expect(r.perf['peak'].decode.bytesPerStep).toBeGreaterThan(activeBytes)
+    expect(r.perf['peak'].decode.bytesPerStep).toBeLessThan(activeBytes + 5e9)
+    expect(r.perf['peak'].decode.regime).toBe('memory')
+  })
+
+  it('Qwen3.8-27B at 32k: dense delta-hybrid, 16 full + 48 DeltaNet layers', () => {
+    const q = MODELS.find(m => m.id === 'qwen3.8-27b')!
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: q, quant,
+      workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
+    })
+    // Full-attn KV: kvHeads 4 × 2(K+V) × headDim 256 × 2B × 16 layers × seq
+    const kv = 4 * 2 * 256 * 2 * 16 * 32768
+    // DeltaNet state: 48 layers × 48 value heads × 128² × 2B
+    const state = 48 * 48 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(kv + state)
+    // Dense 27B: weights ≈ 54 GB at fp16, fits in 80 GB
+    expect(r.memory.weights / 1e9).toBeCloseTo(54, 0)
+    expect(q.architecture.type).toBe('dense')
+  })
+
+  it('Qwen3.8-2.4T-A95B at 32k: 23 full + 69 DeltaNet layers, decode reads 95B active', () => {
+    const q = MODELS.find(m => m.id === 'qwen3.8-2.4t-a95b')!
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: q, quant,
+      workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
+    })
+    const kv = 4 * 2 * 256 * 2 * 23 * 32768
+    const state = 69 * 128 * 128 * 128 * 2
+    expect(r.memory.kvCachePerRequest).toBe(kv + state)
+    // 2.4T × 2B = 4.8 TB, nowhere near one H100
+    expect(r.memory.fits).toBe(false)
+    const d = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: q, quant,
+      workload: { promptTokens: 2048, outputTokens: 512, concurrency: 1 }
+    })
+    const activeBytes = 95_000_000_000 * 2
+    expect(d.perf['peak'].decode.bytesPerStep).toBeGreaterThan(activeBytes)
+    expect(d.perf['peak'].decode.bytesPerStep).toBeLessThan(activeBytes + 5e9)
+  })
+
+  it('GLM-5.3 reuses the GLM-5.2 MLA-DSA base; delta is fp8 shipping weights', () => {
+    const g = MODELS.find(m => m.id === 'glm-5.3')!
+    const r = calculate({
+      accelerator: h100, acceleratorVariantId: 'sxm-80', model: g, quant,
+      workload: { promptTokens: 32768, outputTokens: 0, concurrency: 1 }
+    })
+    expect(r.memory.kvCachePerRequest).toBe(78 * (512 + 64) * 2 * 32768)
+    expect(g.nativeDtype).toBe('fp8')
+    expect(g.maxContext).toBe(1048576)
+    expect(g.paramCount).toBe(753_000_000_000)
+  })
+})
+
 describe('models data — every entry produces finite results', () => {
   const h100 = ACCELERATORS.find(a => a.id === 'h100')!
 

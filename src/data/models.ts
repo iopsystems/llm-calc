@@ -329,6 +329,56 @@ export const MODELS: ModelArch[] = [
       activeParamCount: 17_000_000_000
     }
   },
+  // === Qwen3.8 (2026-08) ===
+  // Same qwen3_5 model_type as the 3.5 line — Gated DeltaNet + Gated Attention,
+  // 3:1 interleave (full_attention_interval 4). Geometry from config.json on HF.
+  // Qwen3.8-27B (Qwen/Qwen3.8-27B): DENSE VL model, Apache 2.0. paramCount is the
+  // 27B text tower per the card (vision encoder not broken out, out of scope for
+  // this text-decode calc). linear_num_value_heads 48 — smaller than the 3.5
+  // line's 64-head DeltaNet state.
+  {
+    id: 'qwen3.8-27b', name: 'Qwen3.8-27B', family: 'qwen3.8',
+    publisher: 'Alibaba', releaseDate: '2026-08',
+    nativeDtype: 'bf16',
+    layers: 64, hiddenDim: 5120, intermediateDim: 17408,
+    numHeads: 24, numKvHeads: 4, headDim: 256, vocabSize: 248320,
+    paramCount: 27_000_000_000,
+    maxContext: 262144,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 48, numFullLayers: 16,
+      numDeltaNetHeads: 48, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: { type: 'dense' }
+  },
+  // Qwen3.8-2.4T-A95B ("Qwen3.8-Max", Qwen/Qwen3.8-2.4T-A95B): text-only MoE,
+  // custom qwen3.8-max license. Card: "2.4T in total and 95B activated", bf16,
+  // 262k native context. layer_types: 69 linear / 23 full.
+  {
+    id: 'qwen3.8-2.4t-a95b', name: 'Qwen3.8-2.4T-A95B', family: 'qwen3.8',
+    publisher: 'Alibaba', releaseDate: '2026-08',
+    nativeDtype: 'bf16',
+    layers: 92, hiddenDim: 8192, intermediateDim: 2048,
+    numHeads: 64, numKvHeads: 4, headDim: 256, vocabSize: 248320,
+    paramCount: 2_400_000_000_000,
+    maxContext: 262144,
+    numNextnLayers: 1,
+    attention: {
+      type: 'delta-hybrid',
+      numDeltaNetLayers: 69, numFullLayers: 23,
+      numDeltaNetHeads: 128, deltaHeadDim: 128,
+      ropeDim: 64
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 512,
+      numExpertsActive: 10,
+      numSharedExperts: 1,
+      activeParamCount: 95_000_000_000
+    }
+  },
   // === Llama ===
   {
     id: 'llama-3.1-8b', name: 'Llama 3.1 8B', family: 'llama-3',
@@ -774,6 +824,42 @@ export const MODELS: ModelArch[] = [
       activeParamCount: 3_000_000_000
     }
   },
+  // Kimi K3 (moonshotai/Kimi-K3, created 2026-07, Kimi K3 License): scales the
+  // Kimi-Linear recipe to flagship size — config model_type is literally
+  // kimi_linear. 69 KDA + 24 gated-MLA layers (full_attn every 4th, kv_lora 512,
+  // qk_rope 64, qk_nope 128, v 128; KDA state 96 heads × 128). "LatentMoE" runs
+  // the 896 routed experts in a 3584-dim latent space (routed_expert_hidden_size),
+  // half of hidden — absorbed here by paramCount/activeParamCount, which the
+  // engine uses for weight/compute costs; sanity: 3·3584·3072·896·92 ≈ 2.72T,
+  // consistent with the card's 2.8T only under latent geometry. Card: 2.8T total,
+  // 104B activated, 1M context. Ships mxfp4 QAT routed-expert weights
+  // (attention/shared-experts/dense-mlp/lm_head excluded) → nativeDtype fp4,
+  // same convention as gpt-oss. intermediateDim = moe_intermediate_size (3072);
+  // the single dense layer's 33792-wide FFN is absorbed by paramCount.
+  {
+    id: 'kimi-k3', name: 'Kimi K3', family: 'kimi',
+    publisher: 'Moonshot AI', releaseDate: '2026-07',
+    nativeDtype: 'fp4',
+    layers: 93, hiddenDim: 7168, intermediateDim: 3072,
+    numHeads: 96, numKvHeads: 96, headDim: 192, vocabSize: 163840,
+    paramCount: 2_800_000_000_000,
+    maxContext: 1048576,
+    numNextnLayers: 0,
+    attention: {
+      type: 'linear-mla-hybrid',
+      kvLoraRank: 512, qkRopeHeadDim: 64,
+      qkNopeHeadDim: 128, vHeadDim: 128,
+      numLinearLayers: 69, numFullLayers: 24,
+      numLinearHeads: 96, linearHeadDim: 128
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 896,
+      numExpertsActive: 16,
+      numSharedExperts: 2,
+      activeParamCount: 104_000_000_000
+    }
+  },
   // === MiniMax ===
   // M2-family: full-attention GQA MoE (no linear/lightning attention — the
   // attn_type_list is all-full). Ships fp8 block-quantized. MTP depth 3
@@ -1052,6 +1138,39 @@ export const MODELS: ModelArch[] = [
     id: 'glm-5.2', name: 'GLM-5.2', family: 'glm',
     publisher: 'Zhipu AI', releaseDate: '2026-06',
     nativeDtype: 'bf16',
+    layers: 78, hiddenDim: 6144, intermediateDim: 12288,
+    numHeads: 64, numKvHeads: 64, headDim: 256, vocabSize: 154880,
+    paramCount: 753_000_000_000,
+    maxContext: 1048576,
+    attention: {
+      type: 'mla-dsa',
+      kvLoraRank: 512, qkRopeHeadDim: 64,
+      qkNopeHeadDim: 192, vHeadDim: 256,
+      topK: 2048
+    },
+    architecture: {
+      type: 'moe',
+      numExperts: 256,
+      numExpertsActive: 8,
+      numSharedExperts: 1,
+      activeParamCount: 40_000_000_000
+    },
+    numNextnLayers: 1
+  },
+  // GLM-5.3 (zai-org/GLM-5.3, created 2026-08): card states "GLM-5.3 uses the
+  // same base model as GLM-5.2 — every gain comes from post-training", and the
+  // config confirms identical glm_moe_dsa geometry (78 layers / 6144 hidden /
+  // 256+1 experts, kv_lora 512, rope 64, nope 192, v 256, index_topk 2048,
+  // nextn 1, 1M ctx). The shipped delta: main repo is fp8 e4m3 block-quantized
+  // (quantization_config + F8_E4M3 tensors) where 5.2 shipped bf16 →
+  // nativeDtype fp8. paramCount 753B from the card; activeParamCount inherited
+  // from the identical GLM-5/5.2 active path (card doesn't break it out).
+  // headDim 256 follows the GLM-5 entry (inert for MLA — KV/attn key off
+  // kv_lora + rope, not headDim).
+  {
+    id: 'glm-5.3', name: 'GLM-5.3', family: 'glm',
+    publisher: 'Zhipu AI', releaseDate: '2026-08',
+    nativeDtype: 'fp8',
     layers: 78, hiddenDim: 6144, intermediateDim: 12288,
     numHeads: 64, numKvHeads: 64, headDim: 256, vocabSize: 154880,
     paramCount: 753_000_000_000,
